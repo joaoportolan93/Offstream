@@ -1,5 +1,7 @@
 import sys
 import os
+import shutil
+import re
 from PySide6.QtWidgets import *
 from PySide6.QtCore import *
 from PySide6.QtGui import *
@@ -294,6 +296,15 @@ class MediaDownloaderPro(QMainWindow):
         
         # Tema inicial
         self.dark_theme = True
+        
+        # Carregar configurações salvas
+        self.load_settings()
+        
+        # Validar FFmpeg
+        self.validate_ffmpeg()
+        
+        # Habilitar drag & drop
+        self.setAcceptDrops(True)
         
         # Conectar sinal ao slot
         self.update_video_info_signal.connect(self.update_video_info)
@@ -634,15 +645,20 @@ class MediaDownloaderPro(QMainWindow):
         elif "webm" in formato_lower:
             resolution = formato.split(" - ")[1].replace("p", "")
             return {
-                'format': f'best[height<={resolution}][ext=webm]',
-                'ffmpeg_location': self._get_ffmpeg_path()
+                # Fallbacks robustos para WEBM
+                'format': f'bestvideo[height<={resolution}][ext=webm]+bestaudio[ext=webm]/bestvideo[height<={resolution}]+bestaudio/best[height<={resolution}]/best',
+                'ffmpeg_location': self._get_ffmpeg_path(),
+                'merge_output_format': 'webm',
+                'ignoreerrors': True,
             }
         else:  # MP4 (default)
             resolution = formato.split(" - ")[1].replace("p", "")
             return {
-                # Simplificado para baixar direto em MP4
-                'format': f'best[height<={resolution}][ext=mp4]/best[ext=mp4]/best',
-                'ffmpeg_location': self._get_ffmpeg_path()
+                # Fallbacks robustos para MP4 - tenta várias combinações
+                'format': f'bestvideo[height<={resolution}][ext=mp4]+bestaudio[ext=m4a]/bestvideo[height<={resolution}]+bestaudio/best[height<={resolution}]/best',
+                'ffmpeg_location': self._get_ffmpeg_path(),
+                'merge_output_format': 'mp4',
+                'ignoreerrors': True,
             }
 
     def _get_ffmpeg_path(self):
@@ -715,6 +731,88 @@ class MediaDownloaderPro(QMainWindow):
                 display_path = "..." + display_path[-37:]
             self.directory_label.setText(display_path)
             self.status_label.setText(f"Pasta de download alterada: {directory}")
+            self.save_settings()  # Salvar configuração
+
+    # === SETTINGS ===
+    def load_settings(self):
+        """Carrega configurações salvas do usuário"""
+        try:
+            with open('settings.json', 'r') as f:
+                settings = json.load(f)
+                # Restaurar diretório
+                if 'download_directory' in settings:
+                    self.download_directory = settings['download_directory']
+                    self.directory_label.setText(self.download_directory[-40:] if len(self.download_directory) > 40 else self.download_directory)
+                # Restaurar tema
+                if 'dark_theme' in settings:
+                    self.dark_theme = settings['dark_theme']
+                    if not self.dark_theme:
+                        self.toggle_theme()  # Mudar para tema claro
+                # Restaurar downloads simultâneos
+                if 'concurrent_downloads' in settings:
+                    self.concurrent_combo.setCurrentText(str(settings['concurrent_downloads']))
+        except FileNotFoundError:
+            pass  # Arquivo ainda não existe
+        except Exception as e:
+            print(f"Erro ao carregar configurações: {e}")
+
+    def save_settings(self):
+        """Salva configurações do usuário"""
+        settings = {
+            'download_directory': self.download_directory,
+            'dark_theme': self.dark_theme,
+            'concurrent_downloads': int(self.concurrent_combo.currentText())
+        }
+        try:
+            with open('settings.json', 'w') as f:
+                json.dump(settings, f, indent=2)
+        except Exception as e:
+            print(f"Erro ao salvar configurações: {e}")
+
+    def validate_ffmpeg(self):
+        """Verifica se FFmpeg está disponível"""
+        ffmpeg_path = self._get_ffmpeg_path()
+        if os.name == 'nt':  # Windows
+            if not os.path.exists(ffmpeg_path):
+                # Tenta encontrar no PATH
+                ffmpeg_in_path = shutil.which('ffmpeg')
+                if ffmpeg_in_path:
+                    self.status_label.setText("✅ FFmpeg encontrado no PATH")
+                else:
+                    self.status_label.setText("⚠️ FFmpeg não encontrado! Conversões podem falhar.")
+                    QMessageBox.warning(self, "FFmpeg não encontrado",
+                        "FFmpeg não foi encontrado no sistema.\n\n"
+                        "Formatos de áudio (MP3, WAV) podem não funcionar.\n\n"
+                        "Instale FFmpeg de: https://ffmpeg.org/download.html")
+        else:
+            if not shutil.which('ffmpeg'):
+                self.status_label.setText("⚠️ FFmpeg não encontrado!")
+
+    # === DRAG & DROP ===
+    def dragEnterEvent(self, event):
+        """Aceita URLs arrastadas para a janela"""
+        if event.mimeData().hasUrls() or event.mimeData().hasText():
+            event.acceptProposedAction()
+
+    def dropEvent(self, event):
+        """Processa URLs soltas na janela"""
+        if event.mimeData().hasUrls():
+            url = event.mimeData().urls()[0].toString()
+            self.url_input.setText(url)
+            self.check_url()
+        elif event.mimeData().hasText():
+            text = event.mimeData().text()
+            # Extrair URL do texto
+            url_pattern = r'https?://[^\s]+'
+            match = re.search(url_pattern, text)
+            if match:
+                self.url_input.setText(match.group())
+                self.check_url()
+
+    def closeEvent(self, event):
+        """Salva configurações ao fechar"""
+        self.save_settings()
+        event.accept()
 
 if __name__ == "__main__":
     app = QApplication(sys.argv)
