@@ -476,18 +476,58 @@ class MediaDownloaderPro(QMainWindow):
 
     def update_video_info(self, info):
         try:
-            # Atualizar título
-            title = info.get('title', 'Sem título')
-            self.title_label.setText(f"Título: {title}")
+            # Verificar se é uma playlist/álbum
+            entries = info.get('entries')
+            is_playlist = entries is not None
             
-            # Atualizar duração
-            duration = info.get('duration', 0)
-            minutes = duration // 60
-            seconds = duration % 60
-            self.duration_label.setText(f"Duração: {minutes}:{seconds:02d}")
+            if is_playlist:
+                # É uma playlist/álbum
+                entries_list = list(entries) if entries else []
+                track_count = len(entries_list)
+                
+                # Título da playlist/álbum
+                title = info.get('title', 'Playlist sem título')
+                uploader = info.get('uploader', info.get('channel', 'Artista desconhecido'))
+                self.title_label.setText(f"📀 Álbum/Playlist: {title}\n🎤 Artista: {uploader}")
+                
+                # Calcular duração total
+                total_duration = 0
+                for entry in entries_list:
+                    if entry and entry.get('duration'):
+                        total_duration += entry.get('duration', 0)
+                
+                hours = total_duration // 3600
+                minutes = (total_duration % 3600) // 60
+                seconds = total_duration % 60
+                
+                if hours > 0:
+                    duration_str = f"{hours}h {minutes}min {seconds}s"
+                else:
+                    duration_str = f"{minutes}min {seconds}s"
+                
+                self.duration_label.setText(f"🎵 {track_count} faixas • Duração total: {duration_str}")
+                
+                # Usar thumbnail da playlist ou da primeira faixa
+                thumbnail_url = info.get('thumbnail', '')
+                if not thumbnail_url and entries_list and entries_list[0]:
+                    thumbnail_url = entries_list[0].get('thumbnail', '')
+                    
+                self.status_label.setText(f"✅ Álbum/Playlist detectado com {track_count} faixas!")
+            else:
+                # É um vídeo/música único
+                title = info.get('title', 'Sem título')
+                self.title_label.setText(f"Título: {title}")
+                
+                # Atualizar duração
+                duration = info.get('duration', 0) or 0
+                minutes = duration // 60
+                seconds = duration % 60
+                self.duration_label.setText(f"Duração: {minutes}:{seconds:02d}")
+                
+                thumbnail_url = info.get('thumbnail', '')
+                self.status_label.setText("Informações carregadas com sucesso!")
             
             # Carregar e exibir miniatura
-            thumbnail_url = info.get('thumbnail', '')
             if thumbnail_url:
                 data = urllib.request.urlopen(thumbnail_url).read()
                 image = QImage()
@@ -495,7 +535,6 @@ class MediaDownloaderPro(QMainWindow):
                 pixmap = QPixmap(image).scaled(400, 225, Qt.KeepAspectRatio, Qt.SmoothTransformation)
                 self.thumbnail_label.setPixmap(pixmap)
                 
-            self.status_label.setText("Informações carregadas com sucesso!")
         except Exception as e:
             self.status_label.setText(f"Erro ao atualizar informações: {str(e)}")
 
