@@ -14,10 +14,29 @@ import datetime
 from plyer import notification
 import urllib.request
 import time
+import base64
+
+# Configurações de Segurança (Ofuscação Simples)
+# As chaves estão invertidas e codificadas em Base64 para evitar leitura direta
+_CID_OBF = "ZmVmYzdjZmQxMzllNmI0YjQ0NTQyY2E3ZDVmMzNhMWM="
+_SEC_OBF = "OTI5OWRlMGQ0OWFjOTEzOTZiYjQ5NDIyNmY5N2Y5MTE="
+
+def get_spotify_credentials():
+    try:
+        # Desofuscar: Decode Base64 -> Reverter String
+        client_id = base64.b64decode(_CID_OBF).decode()[::-1]
+        client_secret = base64.b64decode(_SEC_OBF).decode()[::-1]
+        return client_id, client_secret
+    except:
+        return "", ""
+
+# Obter credenciais
+SPOTIFY_CLIENT_ID, SPOTIFY_CLIENT_SECRET = get_spotify_credentials()
 
 class MediaDownloaderPro(QMainWindow):
     # Definir sinais personalizados
     update_video_info_signal = Signal(dict)
+    update_spotify_info_signal = Signal(dict)
     
     def __init__(self):
         super().__init__()
@@ -308,6 +327,11 @@ class MediaDownloaderPro(QMainWindow):
         
         # Conectar sinal ao slot
         self.update_video_info_signal.connect(self.update_video_info)
+        self.update_spotify_info_signal.connect(self.update_spotify_info)
+        
+        # Variáveis para Spotify
+        self.spotify_songs = None  # Armazena as músicas do Spotify para download
+        self.is_spotify_url = False
 
     def toggle_theme(self):
         self.dark_theme = not self.dark_theme
@@ -460,9 +484,21 @@ class MediaDownloaderPro(QMainWindow):
         if not url:
             self.status_label.setText("Por favor, insira uma URL válida!")
             return
-            
-        self.status_label.setText("Obtendo informações do vídeo...")
-        threading.Thread(target=self._fetch_video_info, args=(url,)).start()
+        
+        # Detectar se é URL do Spotify
+        if self._is_spotify_url(url):
+            self.is_spotify_url = True
+            self.status_label.setText("🎵 Obtendo informações do Spotify...")
+            threading.Thread(target=self._fetch_spotify_info, args=(url,)).start()
+        else:
+            self.is_spotify_url = False
+            self.spotify_songs = None
+            self.status_label.setText("Obtendo informações do vídeo...")
+            threading.Thread(target=self._fetch_video_info, args=(url,)).start()
+
+    def _is_spotify_url(self, url):
+        """Detecta se é um link do Spotify"""
+        return bool(re.match(r'https?://open\.spotify\.com/', url))
 
     def _fetch_video_info(self, url):
         try:
@@ -473,6 +509,122 @@ class MediaDownloaderPro(QMainWindow):
         except Exception as e:
             # Usar QTimer para atualizar a interface da thread principal
             QTimer.singleShot(0, lambda: self.status_label.setText(f"Erro ao obter informações: {str(e)}"))
+
+    def _fetch_spotify_info(self, url):
+        """Busca informações de uma música/playlist/álbum do Spotify"""
+        try:
+            from spotdl import Spotdl
+            from spotdl.utils.config import DEFAULT_CONFIG
+            
+            # Inicializar spotDL com credenciais
+            spotdl = Spotdl(
+                client_id=SPOTIFY_CLIENT_ID,
+                client_secret=SPOTIFY_CLIENT_SECRET,
+                downloader_settings=DEFAULT_CONFIG
+            )
+            
+            # Buscar músicas
+            songs = spotdl.search([url])
+            
+            if not songs:
+                QTimer.singleShot(0, lambda: self.status_label.setText("❌ Nenhuma música encontrada!"))
+                return
+            
+            # Construir informações para exibição
+            if len(songs) == 1:
+                # Uma única música
+                song = songs[0]
+                info = {
+                    'title': song.name,
+                    'artist': song.artist,
+                    'artists': song.artists,
+                    'album': song.album_name,
+                    'duration': song.duration,
+                    'thumbnail': song.cover_url,
+                    'is_playlist': False,
+                    'songs': songs,
+                    'track_count': 1
+                }
+            else:
+                # Playlist ou álbum
+                total_duration = sum(s.duration for s in songs)
+                # Usar info do primeiro track para thumbnail se não houver capa
+                first_song = songs[0]
+                info = {
+                    'title': first_song.album_name or first_song.list_name or 'Playlist',
+                    'artist': first_song.artist,
+                    'artists': list(set(s.artist for s in songs)),
+                    'album': first_song.album_name,
+                    'duration': total_duration,
+                    'thumbnail': first_song.cover_url,
+                    'is_playlist': True,
+                    'songs': songs,
+                    'track_count': len(songs)
+                }
+            
+            self.update_spotify_info_signal.emit(info)
+            
+        except ImportError as e:
+            QTimer.singleShot(0, lambda: self.status_label.setText(
+                "❌ spotdl não instalado! Execute: pip install spotdl"))
+        except Exception as e:
+            QTimer.singleShot(0, lambda: self.status_label.setText(f"❌ Erro Spotify: {str(e)}"))
+
+    def update_spotify_info(self, info):
+        """Atualiza a UI com informações do Spotify"""
+        try:
+            self.spotify_songs = info.get('songs', [])
+            
+            if info.get('is_playlist'):
+                # É um álbum/playlist
+                track_count = info['track_count']
+                title = info.get('title', 'Playlist')
+                artist = info.get('artist', 'Vários Artistas')
+                
+                self.title_label.setText(f"🎵 {title}\n🎤 Artista: {artist}")
+                
+                # Formatar duração total
+                total_duration = info.get('duration', 0)
+                hours = total_duration // 3600
+                minutes = (total_duration % 3600) // 60
+                seconds = total_duration % 60
+                
+                if hours > 0:
+                    duration_str = f"{hours}h {minutes}min {seconds}s"
+                else:
+                    duration_str = f"{minutes}min {seconds}s"
+                
+                self.duration_label.setText(f"📀 {track_count} faixas • Duração total: {duration_str}")
+                self.status_label.setText(f"✅ Spotify: {track_count} faixas encontradas!")
+            else:
+                # Música única
+                title = info.get('title', 'Sem título')
+                artist = info.get('artist', 'Artista desconhecido')
+                album = info.get('album', '')
+                
+                self.title_label.setText(f"🎵 {title}\n🎤 {artist}" + (f"\n💿 {album}" if album else ""))
+                
+                # Formatar duração
+                duration = info.get('duration', 0)
+                minutes = duration // 60
+                seconds = duration % 60
+                self.duration_label.setText(f"⏱️ Duração: {minutes}:{seconds:02d}")
+                self.status_label.setText("✅ Música do Spotify encontrada!")
+            
+            # Carregar thumbnail
+            thumbnail_url = info.get('thumbnail', '')
+            if thumbnail_url:
+                try:
+                    data = urllib.request.urlopen(thumbnail_url).read()
+                    image = QImage()
+                    image.loadFromData(data)
+                    pixmap = QPixmap(image).scaled(400, 225, Qt.KeepAspectRatio, Qt.SmoothTransformation)
+                    self.thumbnail_label.setPixmap(pixmap)
+                except Exception as e:
+                    print(f"Erro ao carregar thumbnail: {e}")
+                    
+        except Exception as e:
+            self.status_label.setText(f"❌ Erro ao exibir informações: {str(e)}")
 
     def update_video_info(self, info):
         try:
@@ -543,15 +695,113 @@ class MediaDownloaderPro(QMainWindow):
         if not url:
             self.status_label.setText("Por favor, insira uma URL válida!")
             return
-            
-        formato = self.format_combo.currentText()
-        self.download_queue.put((url, formato))
-        self.update_queue_text(f"Adicionado: {url} ({formato})")
         
-        if self.download_pool is None:
-            max_workers = int(self.concurrent_combo.currentText())
-            self.download_pool = concurrent.futures.ThreadPoolExecutor(max_workers=max_workers)
-            threading.Thread(target=self.process_download_queue).start()
+        formato = self.format_combo.currentText()
+        
+        # Verificar se é download do Spotify
+        if self.is_spotify_url and self.spotify_songs:
+            self.status_label.setText("🎵 Iniciando download do Spotify...")
+            threading.Thread(target=self._execute_spotify_download, args=(formato,)).start()
+        else:
+            self.download_queue.put((url, formato))
+            self.update_queue_text(f"Adicionado: {url} ({formato})")
+            
+            if self.download_pool is None:
+                max_workers = int(self.concurrent_combo.currentText())
+                self.download_pool = concurrent.futures.ThreadPoolExecutor(max_workers=max_workers)
+                threading.Thread(target=self.process_download_queue).start()
+
+    def _execute_spotify_download(self, formato):
+        """Executa o download de músicas do Spotify"""
+        try:
+            from spotdl import Spotdl
+            from spotdl.utils.config import DEFAULT_CONFIG
+            from spotdl.types.options import DownloaderOptions
+            
+            QTimer.singleShot(0, lambda: self.download_button.setEnabled(False))
+            QTimer.singleShot(0, lambda: self.cancel_button.setEnabled(True))
+            
+            # Determinar qualidade baseado no formato selecionado
+            audio_format = "mp3"
+            bitrate = "320k"
+            
+            if "mp3" in formato.lower():
+                audio_format = "mp3"
+                bitrate = "320k" if "320" in formato else "128k"
+            elif "wav" in formato.lower():
+                audio_format = "wav"
+                bitrate = None
+            elif "mp4" in formato.lower() or "webm" in formato.lower():
+                # Para vídeo, ainda usamos mp3 (Spotify só tem áudio)
+                audio_format = "mp3"
+                bitrate = "320k"
+                QTimer.singleShot(0, lambda: self.status_label.setText(
+                    "⚠️ Spotify só suporta áudio. Baixando como MP3..."))
+            
+            # Configurar downloader
+            downloader_settings = {
+                'output': self.download_directory,
+                'format': audio_format,
+                'bitrate': bitrate,
+                'ffmpeg': self._get_ffmpeg_path() if os.name == 'nt' else 'ffmpeg',
+            }
+            
+            # Inicializar spotDL
+            spotdl = Spotdl(
+                client_id=SPOTIFY_CLIENT_ID,
+                client_secret=SPOTIFY_CLIENT_SECRET,
+                downloader_settings=downloader_settings
+            )
+            
+            songs = self.spotify_songs
+            total_songs = len(songs)
+            
+            for i, song in enumerate(songs, 1):
+                if self.download_cancelled:
+                    QTimer.singleShot(0, lambda: self.status_label.setText("Download cancelado!"))
+                    break
+                
+                progress = int((i - 1) / total_songs * 100)
+                song_name = f"{song.artist} - {song.name}"
+                QTimer.singleShot(0, lambda p=progress, s=song_name, idx=i, total=total_songs: 
+                    self._update_spotify_progress(p, s, idx, total))
+                
+                try:
+                    # Fazer download
+                    result = spotdl.download(song)
+                    if result:
+                        QTimer.singleShot(0, lambda s=song_name: 
+                            self.update_queue_text(f"✅ Baixado: {s}"))
+                except Exception as e:
+                    QTimer.singleShot(0, lambda s=song_name, err=str(e): 
+                        self.update_queue_text(f"❌ Erro em {s}: {err}"))
+            
+            if not self.download_cancelled:
+                QTimer.singleShot(0, lambda: self.progress_bar.setValue(100))
+                QTimer.singleShot(0, lambda: self.status_label.setText(
+                    f"✅ Download concluído! {total_songs} músicas baixadas."))
+                self.show_notification("Download Concluído", 
+                    f"{total_songs} músicas do Spotify foram baixadas!")
+                
+                # Adicionar ao histórico
+                url = self.url_input.text()
+                self.add_to_history(url, f"Spotify ({audio_format.upper()})", "Concluído")
+            
+        except ImportError:
+            QTimer.singleShot(0, lambda: self.status_label.setText(
+                "❌ spotdl não instalado! Execute: pip install spotdl"))
+        except Exception as e:
+            QTimer.singleShot(0, lambda: self.status_label.setText(f"❌ Erro: {str(e)}"))
+            self.add_to_history(self.url_input.text(), "Spotify", "Erro")
+        finally:
+            self.download_cancelled = False
+            QTimer.singleShot(0, lambda: self.download_button.setEnabled(True))
+            QTimer.singleShot(0, lambda: self.cancel_button.setEnabled(False))
+
+    def _update_spotify_progress(self, progress, song_name, current, total):
+        """Atualiza a barra de progresso para downloads do Spotify"""
+        self.progress_bar.setValue(progress)
+        self.status_label.setText(f"🎵 Baixando ({current}/{total}): {song_name}")
 
     def process_download_queue(self):
         while True:
