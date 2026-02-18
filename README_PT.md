@@ -21,15 +21,36 @@
 
 ---
 
-## 📸 Capturas de Tela
+## 🌟 Sobre o Projeto
 
-<div align="center">
-  <img src="assets/app_screenshot.png" alt="Interface do Offstream" width="800">
-</div>
+**Offstream** é um downloader de mídia poderoso e versátil, projetado para oferecer uma experiência perfeita ao baixar vídeos e áudios de várias plataformas. Construído com Python, PySide6 e Kivy, ele oferece uma interface moderna com tema escuro tanto para desktop (Windows) quanto para usuários móveis (Android).
+
+Se você deseja salvar seus vídeos favoritos do YouTube em alta qualidade (até 4K/8K se o vídeo estiver disponível nessa qualidade) ou baixar playlists inteiras do Spotify diretamente no seu dispositivo, o Offstream lida com tudo isso com facilidade e estilo. Ele combina funcionalidade robusta com uma experiência de usuário premium, tornando o arquivamento de mídia simples e agradável.
+
+## 🧩 Arquitetura
+
+```mermaid
+graph TD
+    subgraph Desktop [Windows Desktop]
+        UI_D[Offstream Pro UI] --> Logic_D[App Logic]
+    end
+
+    subgraph Mobile [Android Mobile]
+        UI_M[Mobile UI] --> Logic_M[MediaDownloader Lib]
+    end
+
+    Logic_D --> Core
+    Logic_M --> Core
+
+    subgraph Core [Core Engine]
+        DL[yt-dlp / FFmpeg]
+        SP[SpotDL]
+    end
+```
 
 ## 🚀 Funcionalidades
 
-- **Multi-Plataforma**: Desktop (Windows) e Mobile (Android).
+- **Multi-Plataforma**: Desktop (Windows) e Mobile (Android) (Obs: O app para mobile ainda está em desenvolvimento).
 - **Alta Qualidade**: Downloads de até 4K/8K.
 - **Suporte Spotify**: Baixe músicas e playlists diretamente.
 - **Fila Inteligente**: Gerencie múltiplos downloads simultaneamente.

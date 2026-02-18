@@ -24,45 +24,37 @@
 
 ---
 
-## 📸 Screenshots
+## 🌟 About the Project
 
-<div align="center">
-  <!-- Place the user provided screenshot here -->
-  <img src="assets/app_screenshot.png" alt="Offstream Application Interface" width="800">
-</div>
+**Offstream** is a powerful and versatile media downloader designed to provide a seamless experience for downloading videos and audio from various platforms. Built with Python, PySide6, and Kivy, it offers a modern, dark-themed interface for both desktop (Windows) and mobile (Android) users.
+
+Whether you want to save your favorite YouTube videos in high quality (up to 4K/8K if the video is available in that quality) or download entire Spotify playlists directly to your device, Offstream handles it all with ease and style. It combines robust functionality with a premium user experience, making media archiving simple and enjoyable.
+
 
 ## 🧩 Architecture
 
 ```mermaid
-classDiagram
-    class OffstreamPro {
-        +queue : Queue
-        +setup_ui()
-        +start_download()
-    }
-    class ModernNavBar {
-        +create_nav_button()
-    }
-    class DownloadItemWidget {
-        +update_progress()
-    }
-    class OffstreamMobile {
-        +build()
-        +download()
-    }
-    class MobileDownloader {
-        +get_video_info()
-        +download_background()
-    }
+graph TD
+    subgraph Desktop [Windows Desktop]
+        UI_D[Offstream Pro UI] --> Logic_D[App Logic]
+    end
 
-    OffstreamPro *-- ModernNavBar
-    OffstreamPro *-- DownloadItemWidget
-    OffstreamMobile *-- MobileDownloader
+    subgraph Mobile [Android Mobile]
+        UI_M[Mobile UI] --> Logic_M[MediaDownloader Lib]
+    end
+
+    Logic_D --> Core
+    Logic_M --> Core
+
+    subgraph Core [Core Engine]
+        DL[yt-dlp / FFmpeg]
+        SP[SpotDL]
+    end
 ```
 
 ## 🚀 Features
 
-- **Multi-Platform**: Desktop (Windows) and Mobile (Android).
+- **Multi-Platform**: Desktop (Windows) and Mobile (Android) (Obs: The mobile app is still under development).
 - **High Quality**: Downloads up to 4K/8K.
 - **Spotify Support**: Download songs and playlists directly.
 - **Smart Queue**: Manage multiple downloads simultaneously.
