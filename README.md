@@ -1,133 +1,106 @@
 
 <div align="center">
-  <img src="assets/banner.png" alt="MediaDownloader Pro" width="100%">
+  <img src="assets/banner_offstream.png" alt="Offstream" width="100%">
   
-  <p>
-    <b>Forge Your Offline Media Collection</b>
-  </p>
+  # Offstream
+  
+  **Your Premium Media Downloader for Windows & Mobile**
+  
+  [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+  [![Python](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/downloads/)
+  [![Kivy](https://img.shields.io/badge/Kivy-2.3.0-green.svg)](https://kivy.org/)
+  [![PySide6](https://img.shields.io/badge/PySide6-6.6.1-green.svg)](https://pypi.org/project/PySide6/)
 
-  <p>
-    <a href="https://www.python.org/">
-      <img src="https://img.shields.io/badge/Python-3.8+-blue.svg" alt="Python">
-    </a>
-    <a href="https://qt.io/">
-      <img src="https://img.shields.io/badge/PySide6-GUI-green.svg" alt="PySide6">
-    </a>
-    <a href="https://github.com/yt-dlp/yt-dlp">
-      <img src="https://img.shields.io/badge/yt--dlp-Supported-red.svg" alt="yt-dlp">
-    </a>
-    <a href="https://github.com/spotDL/spotdl">
-      <img src="https://img.shields.io/badge/spotDL-Supported-1DB954.svg" alt="spotDL">
-    </a>
-     <a href="LICENSE">
-      <img src="https://img.shields.io/badge/License-MIT-yellow.svg" alt="License">
-    </a>
-  </p>
+  [🇧🇷 Português](README_PT.md) | [🇺🇸 English](README.md)
+  
 </div>
 
 ---
 
-## 🎭 What is MediaDownloader Pro?
+### 📖 Documentation / Documentação
+| [CODE OF CONDUCT](CODE_OF_CONDUCT.md) | [CONTRIBUTING](CONTRIBUTING.md) | [SECURITY](SECURITY.md) |
+| :---: | :---: | :---: |
+| [CÓDIGO DE CONDUTA](CODE_OF_CONDUCT_PT.md) | [CONTRIBUINDO](CONTRIBUTING_PT.md) | [SEGURANÇA](SECURITY_PT.md) |
 
-**MediaDownloader Pro** is a powerful and modern desktop application designed to grant you control over your media. Whether it's high-definition videos from YouTube or your favorite playlists from Spotify, MediaDownloader Pro handles it all with a sleek, user-friendly interface.
+---
 
-Built with **Python** and **PySide6**, it combines the robustness of command-line tools like `yt-dlp` and `spotdl` with the ease of use of a GUI, featuring dark mode, queue management, and batch processing.
-
-## 🌟 Features
-
-### 🎯 Core Capabilities
-- **Multi-Platform Support**: Seamlessly download content from **YouTube** and **Spotify**.
-- **High Quality Formats**: 
-  - Video: MP4, WEBM (up to 1080p).
-  - Audio: MP3 (320kbps), WAV (Lossless).
-- **Smart Detection**: Automatically detects if a URL is a single track/video or a full playlist/album.
-
-### ⚡ Power User Tools
-- **Batch Processing**: Configurable concurrent downloads (download multiple files at once).
-- **Queue System**: View active downloads, pause, resume, or cancel operations.
-- **History & Favorites**: Keep track of what you've downloaded and save your favorite links for quick access.
-
-### 🎨 Modern Experience
-- **Sleek UI**: Material-inspired design with a native Dark Mode.
-- **Responsive**: Adaptive layout that fits your workflow.
-- **No Ads**: Clean, distraction-free interface.
-
-## 🏗️ Tech Stack
+## 📸 Screenshots
 
 <div align="center">
-
-| Component | Technology | Description |
-| :--- | :--- | :--- |
-| **Language** | ![Python](https://img.shields.io/badge/Python-3776AB?style=flat&logo=python&logoColor=white) | Core logic and backend processing. |
-| **GUI Framework** | ![Qt](https://img.shields.io/badge/Qt-41CD52?style=flat&logo=qt&logoColor=white) | **PySide6** for a native, high-performance interface. |
-| **Video Engine** | ![yt-dlp](https://img.shields.io/badge/yt--dlp-red?style=flat) | Advanced YouTube download handling. |
-| **Audio Engine** | ![spotDL](https://img.shields.io/badge/spotDL-1DB954?style=flat&logo=spotify&logoColor=white) | High-quality Spotify downloader. |
-| **Processing** | ![FFmpeg](https://img.shields.io/badge/FFmpeg-007808?style=flat&logo=ffmpeg&logoColor=white) | Media conversion and metadata embedding. |
-
+  <!-- Place the user provided screenshot here -->
+  <img src="assets/app_screenshot.png" alt="Offstream Application Interface" width="800">
 </div>
 
-## 🚀 Getting Started
+## 🧩 Architecture
 
-Follow these steps to set up MediaDownloader Pro on your machine.
+```mermaid
+classDiagram
+    class OffstreamPro {
+        +queue : Queue
+        +setup_ui()
+        +start_download()
+    }
+    class ModernNavBar {
+        +create_nav_button()
+    }
+    class DownloadItemWidget {
+        +update_progress()
+    }
+    class OffstreamMobile {
+        +build()
+        +download()
+    }
+    class MobileDownloader {
+        +get_video_info()
+        +download_background()
+    }
 
-### Prerequisites
+    OffstreamPro *-- ModernNavBar
+    OffstreamPro *-- DownloadItemWidget
+    OffstreamMobile *-- MobileDownloader
+```
 
-- **Python 3.8** or higher.
-- **FFmpeg**: Required for media conversion.
-  - *Windows*: Download and add to PATH.
-  - *Linux*: `sudo apt install ffmpeg`
-  - *macOS*: `brew install ffmpeg`
+## 🚀 Features
 
-### 📦 Installation
+- **Multi-Platform**: Desktop (Windows) and Mobile (Android).
+- **High Quality**: Downloads up to 4K/8K.
+- **Spotify Support**: Download songs and playlists directly.
+- **Smart Queue**: Manage multiple downloads simultaneously.
+- **Modern UI**: Sleek dark mode interface.
 
-1. **Clone the repository**
+## 🛠️ Installation
+
+### Desktop (Windows)
+1. Clone the repository:
    ```bash
    git clone https://github.com/joaoportolan93/Video-downloader.git
    cd Video-downloader
    ```
-
-2. **Install dependencies**
+2. Create a virtual environment:
+   ```bash
+   python -m venv .venv
+   .venv\Scripts\activate
+   ```
+3. Install dependencies:
    ```bash
    pip install -r requirements.txt
    ```
-
-3. **Install spotDL (Optional, for Spotify support)**
+4. Run the application:
    ```bash
-   pip install spotdl
+   python app.py
    ```
 
-### 🎮 Usage
-
-Run the application:
+### Mobile (Android)
+Requires [Buildozer](https://buildozer.readthedocs.io/en/latest/) (Linux/WSL).
 ```bash
-python app.py
+cd mobile
+buildozer android debug
 ```
-
-1. Paste a YouTube or Spotify URL.
-2. Click **"Verificar URL"** to fetch metadata.
-3. Select your desired format and quality.
-4. Click **"⬇️ Download"**!
 
 ## 🤝 Contributing
 
-Contributions are welcome! If you have ideas for new features or bug fixes:
+Contributions are welcome! Please read our [Contributing Guidelines](CONTRIBUTING.md) for details.
 
-1. Fork the project.
-2. Create your feature branch (`git checkout -b feature/AmazingFeature`).
-3. Commit your changes (`git commit -m 'Add some AmazingFeature'`).
-4. Push to the branch (`git push origin feature/AmazingFeature`).
-5. Open a Pull Request.
+## 📄 License
 
-## 📜 License
-
-Distributed under the MIT License. See `LICENSE` for more information.
-
-## 👨‍💻 Author
-
-**João Portolan**
-
----
-
-<div align="center">
-  <sub>Built with ❤️ using Python and Qt</sub>
-</div>
+This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.

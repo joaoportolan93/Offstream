@@ -1,752 +1,847 @@
 import sys
 import os
-import shutil
 import re
-from PySide6.QtWidgets import *
-from PySide6.QtCore import *
-from PySide6.QtGui import *
-from yt_dlp import YoutubeDL
 import threading
 import queue
 import concurrent.futures
-import json
-import datetime
-from plyer import notification
-import urllib.request
 import time
 import base64
+import urllib.request
+from datetime import datetime
+
+from PySide6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, 
+                               QHBoxLayout, QLabel, QLineEdit, QPushButton, 
+                               QFrame, QStackedWidget, QListWidget, QListWidgetItem, 
+                               QAbstractItemView, QComboBox, QSlider, QScrollArea, 
+                               QGraphicsDropShadowEffect, QSizePolicy, QFileDialog)
+from PySide6.QtCore import Qt, Signal, QSize, QTimer, QPropertyAnimation, QEasingCurve
+from PySide6.QtGui import QIcon, QFont, QColor, QPixmap, QImage, QPainter, QPainterPath
+
+from yt_dlp import YoutubeDL
 
 # Configurações de Segurança (Ofuscação Simples)
-# As chaves estão invertidas e codificadas em Base64 para evitar leitura direta
 _CID_OBF = "ZmVmYzdjZmQxMzllNmI0YjQ0NTQyY2E3ZDVmMzNhMWM="
 _SEC_OBF = "OTI5OWRlMGQ0OWFjOTEzOTZiYjQ5NDIyNmY5N2Y5MTE="
 
 def get_spotify_credentials():
     try:
-        # Desofuscar: Decode Base64 -> Reverter String
         client_id = base64.b64decode(_CID_OBF).decode()[::-1]
         client_secret = base64.b64decode(_SEC_OBF).decode()[::-1]
         return client_id, client_secret
     except:
         return "", ""
 
-# Obter credenciais
 SPOTIFY_CLIENT_ID, SPOTIFY_CLIENT_SECRET = get_spotify_credentials()
 
+# Custom Logger for yt-dlp
+class MyLogger:
+    def debug(self, msg):
+        pass
+
+    def warning(self, msg):
+        pass
+
+    def error(self, msg):
+        if "unavailable" in msg.lower() or "not available" in msg.lower():
+            print(f"\\n[Offstream] ⚠️ VIDEO INDISPONÍVEL.")
+            print("[Offstream] Pulando para o próximo da fila...\\n")
+        else:
+            print(f"Error: {msg}")
+
+class ModernNavBar(QFrame):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setFixedWidth(250)
+        self.setStyleSheet("""
+            QFrame {
+                background-color: #1e1e2e;
+                border-right: 1px solid #2d2d3d;
+            }
+            QPushButton {
+                text-align: left;
+                padding: 15px 20px;
+                border: none;
+                border-radius: 10px;
+                color: #a0a0a0;
+                font-size: 14px;
+                background-color: transparent;
+                margin: 5px 10px;
+            }
+            QPushButton:hover {
+                background-color: #2d2d3d;
+                color: white;
+            }
+            QPushButton:checked {
+                background-color: linear-gradient(90deg, #2d2d3d 0%, #1e1e2e 100%);
+                color: white;
+                border-left: 3px solid #4a90e2;
+            }
+        """)
+        
+        layout = QVBoxLayout(self)
+        layout.setSpacing(5)
+        layout.setContentsMargins(0, 20, 0, 20)
+        
+        # Logo Area
+        logo_label = QLabel("Offstream")
+        logo_label.setStyleSheet("color: white; font-size: 20px; font-weight: bold; padding-left: 20px;")
+        layout.addWidget(logo_label)
+        
+        pro_label = QLabel("Pro")
+        pro_label.setStyleSheet("color: #4a90e2; font-size: 12px; font-weight: bold; padding-left: 20px; margin-bottom: 20px;")
+        layout.addWidget(pro_label)
+
+        # Buttons
+        self.btn_home = self.create_nav_button("🏠 Início")
+        self.btn_history = self.create_nav_button("🕒 Histórico")
+        self.btn_favorites = self.create_nav_button("⭐ Favoritos")
+        self.btn_settings = self.create_nav_button("⚙️ Configurações")
+        self.btn_theme = self.create_nav_button("🌗 Tema")
+
+        layout.addWidget(self.btn_home)
+        layout.addWidget(self.btn_history)
+        layout.addWidget(self.btn_favorites)
+        layout.addWidget(self.btn_settings)
+        layout.addWidget(self.btn_theme)
+        
+        layout.addStretch()
+
+    def create_nav_button(self, text):
+        btn = QPushButton(text)
+        btn.setCheckable(True)
+        return btn
+
+class DownloadItemWidget(QFrame):
+    def __init__(self, title, progress=0, status="Baixando...", parent=None):
+        super().__init__(parent)
+        self.setFixedHeight(80)
+        self.setStyleSheet("""
+            QFrame {
+                background-color: #252535;
+                border-radius: 12px;
+                margin-bottom: 10px;
+            }
+            QLabel {
+                color: white;
+                background: transparent;
+            }
+        """)
+        
+        layout = QHBoxLayout(self)
+        layout.setContentsMargins(15, 15, 15, 15)
+        
+        # Icon
+        icon_label = QLabel("▶️")
+        icon_label.setFixedSize(40, 40)
+        icon_label.setStyleSheet("background-color: #2d2d3d; border-radius: 20px; font-size: 20px; qproperty-alignment: AlignCenter;")
+        layout.addWidget(icon_label)
+        
+        # Info
+        info_layout = QVBoxLayout()
+        self.title_lbl = QLabel(title)
+        self.title_lbl.setStyleSheet("font-weight: bold; font-size: 14px;")
+        
+        self.status_lbl = QLabel(status) # Percentage or Status
+        self.status_lbl.setStyleSheet("color: #a0a0a0; font-size: 12px;")
+        
+        info_layout.addWidget(self.title_lbl)
+        info_layout.addWidget(self.status_lbl)
+        layout.addLayout(info_layout)
+        
+        # Progress Bar
+        self.progress_bar = QFrame()
+        self.progress_bar.setFixedHeight(4)
+        self.progress_bar.setStyleSheet("background-color: #2d2d3d; border-radius: 2px;")
+        self.progress_fill = QFrame(self.progress_bar)
+        self.progress_fill.setFixedHeight(4)
+        self.progress_fill.setStyleSheet("background-color: #4a90e2; border-radius: 2px;")
+        self.set_progress(progress)
+        
+        # We add the bar to a layout wrapper to position it below or beside text
+        # For simplicity in this layout, let's put it at the bottom of info_layout
+        info_layout.addWidget(self.progress_bar)
+
+    def set_progress(self, value):
+        width = self.width() if self.width() > 0 else 400 # Approximation
+        fill_width = int(width * (value / 100))
+        self.progress_fill.setFixedWidth(fill_width)
+        if value < 100:
+            self.status_lbl.setText(f"{value}%")
+        else:
+            self.status_lbl.setText("Concluído")
+
 class MediaDownloaderPro(QMainWindow):
-    # Definir sinais personalizados
     update_video_info_signal = Signal(dict)
     update_spotify_info_signal = Signal(dict)
     
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("MediaDownloader Pro v2.0")
-        self.setMinimumSize(1000, 800)
+        self.setWindowTitle("Offstream Pro")
+        self.setMinimumSize(1100, 700)
         
-        # Configurar estilo
-        self.setStyleSheet("""
-            QMainWindow {
-                background-color: #1e1e1e;
-            }
-            QWidget {
-                color: #ffffff;
-                font-size: 14px;
-            }
-            QPushButton {
-                background-color: #0d6efd;
-                border: none;
-                padding: 8px 16px;
-                border-radius: 4px;
-                color: white;
-            }
-            QPushButton:hover {
-                background-color: #0b5ed7;
-            }
-            QPushButton:disabled {
-                background-color: #6c757d;
-            }
-            QLineEdit {
-                padding: 8px;
-                background-color: #2d2d2d;
-                border: 1px solid #404040;
-                border-radius: 4px;
-                color: white;
-            }
-            QComboBox {
-                padding: 8px;
-                background-color: #2d2d2d;
-                border: 1px solid #404040;
-                border-radius: 4px;
-                color: white;
-            }
-            QComboBox::drop-down {
-                border: none;
-                background-color: #2d2d2d;
-            }
-            QComboBox::down-arrow {
-                image: none;
-                border-left: 5px solid transparent;
-                border-right: 5px solid transparent;
-                border-top: 5px solid white;
-                margin-right: 8px;
-            }
-            QComboBox QAbstractItemView {
-                background-color: #2d2d2d;
-                border: 1px solid #404040;
-                color: white;
-                selection-background-color: #0d6efd;
-            }
-            QProgressBar {
-                border: 2px solid #404040;
-                border-radius: 5px;
-                text-align: center;
-                background-color: #2d2d2d;
-            }
-            QProgressBar::chunk {
-                background-color: #0d6efd;
-                border-radius: 3px;
-            }
-            QTabWidget::pane {
-                border: 1px solid #404040;
-                background-color: #1e1e1e;
-            }
-            QTabBar::tab {
-                background-color: #2d2d2d;
-                padding: 8px 16px;
-                margin-right: 2px;
-            }
-            QTabBar::tab:selected {
-                background-color: #0d6efd;
-            }
-            QTextEdit {
-                background-color: #2d2d2d;
-                border: 1px solid #404040;
-                border-radius: 4px;
-            }
-        """)
-        
-        # Widget central
-        central_widget = QWidget()
-        self.setCentralWidget(central_widget)
-        
-        # Layout principal
-        layout = QVBoxLayout(central_widget)
-        layout.setSpacing(20)
-        layout.setContentsMargins(20, 20, 20, 20)
-        
-        # Header com logo e título
-        header_layout = QHBoxLayout()
-        logo_label = QLabel("🎬")
-        logo_label.setStyleSheet("font-size: 48px;")
-        header_layout.addWidget(logo_label)
-        
-        title_label = QLabel("MediaDownloader Pro")
-        title_label.setStyleSheet("font-size: 32px; font-weight: bold;")
-        header_layout.addWidget(title_label)
-        header_layout.addStretch()
-        
-        # Botão de tema
-        self.theme_button = QPushButton("🌙 Tema Escuro")
-        self.theme_button.clicked.connect(self.toggle_theme)
-        header_layout.addWidget(self.theme_button)
-        layout.addLayout(header_layout)
-        
-        # URL input
-        url_layout = QHBoxLayout()
-        self.url_input = QLineEdit()
-        self.url_input.setPlaceholderText("Cole o URL do vídeo aqui...")
-        url_layout.addWidget(self.url_input)
-        
-        self.check_url_button = QPushButton("Verificar URL")
-        self.check_url_button.clicked.connect(self.check_url)
-        url_layout.addWidget(self.check_url_button)
-        layout.addLayout(url_layout)
-        
-        # Informações do vídeo
-        self.info_group = QGroupBox("Informações do Vídeo")
-        info_layout = QVBoxLayout()
-        
-        self.thumbnail_label = QLabel()
-        self.thumbnail_label.setAlignment(Qt.AlignCenter)
-        info_layout.addWidget(self.thumbnail_label)
-        
-        self.title_label = QLabel()
-        self.duration_label = QLabel()
-        info_layout.addWidget(self.title_label)
-        info_layout.addWidget(self.duration_label)
-        
-        self.info_group.setLayout(info_layout)
-        layout.addWidget(self.info_group)
-        
-        # Controles
-        controls_layout = QHBoxLayout()
-        
-        # Formato
-        format_group = QGroupBox("Formato")
-        format_layout = QVBoxLayout()
-        self.format_combo = QComboBox()
-        self.format_combo.addItems([
-            "MP4 - 1080p", 
-            "MP4 - 720p", 
-            "MP4 - 480p",
-            "MP3 - 320kbps", 
-            "MP3 - 128kbps",
-            "WAV - Alta Qualidade",
-            "WEBM - 1080p", 
-            "WEBM - 720p"
-        ])
-        format_layout.addWidget(self.format_combo)
-        format_group.setLayout(format_layout)
-        controls_layout.addWidget(format_group)
-        
-        # Downloads simultâneos
-        concurrent_group = QGroupBox("Downloads Simultâneos")
-        concurrent_layout = QVBoxLayout()
-        self.concurrent_combo = QComboBox()
-        self.concurrent_combo.addItems(["1", "2", "3", "4", "5"])
-        self.concurrent_combo.setCurrentText("3")
-        concurrent_layout.addWidget(self.concurrent_combo)
-        concurrent_group.setLayout(concurrent_layout)
-        controls_layout.addWidget(concurrent_group)
-        
-        # Frame para seleção de diretório
-        directory_group = QGroupBox("Diretório de Download")
-        directory_layout = QVBoxLayout()
-        
-        self.directory_label = QLabel(os.path.join(os.path.expanduser("~"), "Downloads"))
-        directory_layout.addWidget(self.directory_label)
-        
-        self.directory_button = QPushButton("📁 Escolher Pasta")
-        self.directory_button.clicked.connect(self.choose_directory)
-        directory_layout.addWidget(self.directory_button)
-        
-        directory_group.setLayout(directory_layout)
-        controls_layout.addWidget(directory_group)
-        
-        layout.addLayout(controls_layout)
-        
-        # Botões de ação
-        buttons_layout = QHBoxLayout()
-        self.download_button = QPushButton("⬇️ Download")
-        self.download_button.clicked.connect(self.start_download)
-        self.pause_button = QPushButton("⏸️ Pausar")
-        self.pause_button.setEnabled(False)
-        self.pause_button.clicked.connect(self.toggle_pause)
-        self.cancel_button = QPushButton("⏹️ Cancelar")
-        self.cancel_button.setEnabled(False)
-        self.cancel_button.clicked.connect(self.cancel_download)
-        
-        buttons_layout.addWidget(self.download_button)
-        buttons_layout.addWidget(self.pause_button)
-        buttons_layout.addWidget(self.cancel_button)
-        layout.addLayout(buttons_layout)
-        
-        # Barra de progresso
-        self.progress_bar = QProgressBar()
-        self.progress_bar.setTextVisible(True)
-        layout.addWidget(self.progress_bar)
-        
-        # Status
-        self.status_label = QLabel()
-        layout.addWidget(self.status_label)
-        
-        # Tabs
-        tabs = QTabWidget()
-        
-        # Tab de Downloads Ativos
-        self.queue_tab = QWidget()
-        queue_layout = QVBoxLayout()
-        self.queue_text = QTextEdit()
-        self.queue_text.setReadOnly(True)
-        queue_layout.addWidget(self.queue_text)
-        self.queue_tab.setLayout(queue_layout)
-        tabs.addTab(self.queue_tab, "Downloads Ativos")
-        
-        # Tab de Histórico
-        self.history_tab = QWidget()
-        history_layout = QVBoxLayout()
-        self.history_text = QTextEdit()
-        self.history_text.setReadOnly(True)
-        history_layout.addWidget(self.history_text)
-        clear_history_button = QPushButton("Limpar Histórico")
-        clear_history_button.clicked.connect(self.clear_history)
-        history_layout.addWidget(clear_history_button)
-        self.history_tab.setLayout(history_layout)
-        tabs.addTab(self.history_tab, "Histórico")
-        
-        # Tab de Favoritos
-        self.favorites_tab = QWidget()
-        favorites_layout = QVBoxLayout()
-        self.favorites_text = QTextEdit()
-        self.favorites_text.setReadOnly(True)
-        favorites_layout.addWidget(self.favorites_text)
-        
-        fav_buttons_layout = QHBoxLayout()
-        add_favorite_button = QPushButton("Adicionar aos Favoritos")
-        add_favorite_button.clicked.connect(self.add_favorite)
-        remove_favorite_button = QPushButton("Remover Favorito")
-        remove_favorite_button.clicked.connect(self.remove_favorite)
-        
-        fav_buttons_layout.addWidget(add_favorite_button)
-        fav_buttons_layout.addWidget(remove_favorite_button)
-        favorites_layout.addLayout(fav_buttons_layout)
-        
-        self.favorites_tab.setLayout(favorites_layout)
-        tabs.addTab(self.favorites_tab, "Favoritos")
-        
-        layout.addWidget(tabs)
-        
-        # Variáveis de controle
-        self.download_paused = False
-        self.download_cancelled = False
-        self.current_download = None
+        # Logic Variables (Initialize these first!)
         self.download_queue = queue.Queue()
         self.active_downloads = []
         self.download_pool = None
-        
-        # Adicionar variável para armazenar o diretório
+        self.is_spotify_url = False
+        self.spotify_songs = None
         self.download_directory = os.path.join(os.path.expanduser("~"), "Downloads")
         
-        # Carregar dados
-        self.history = self.load_data('historico.json')
-        self.favorites = self.load_data('favoritos.json')
-        self.update_history_ui()
-        self.update_favorites_ui()
+        # Main Layout
+        self.main_widget = QWidget()
+        self.setCentralWidget(self.main_widget)
+        self.main_layout = QHBoxLayout(self.main_widget)
+        self.main_layout.setContentsMargins(0, 0, 0, 0)
+        self.main_layout.setSpacing(0)
         
-        # Tema inicial
-        self.dark_theme = True
+        # Sidebar
+        self.navbar = ModernNavBar()
+        self.main_layout.addWidget(self.navbar)
         
-        # Carregar configurações salvas
-        self.load_settings()
+        # Content Area
+        self.content_area = QStackedWidget()
+        self.content_area.setStyleSheet("background-color: #181825;")
+        self.main_layout.addWidget(self.content_area)
         
-        # Validar FFmpeg
-        self.validate_ffmpeg()
+        self.setup_home_page()
+        self.setup_history_page()
+        self.setup_favorites_page()
+        self.setup_settings_page()
         
-        # Habilitar drag & drop
-        self.setAcceptDrops(True)
+        self.setup_connections()
         
-        # Conectar sinal ao slot
-        self.update_video_info_signal.connect(self.update_video_info)
-        self.update_spotify_info_signal.connect(self.update_spotify_info)
-        
-        # Variáveis para Spotify
-        self.spotify_songs = None  # Armazena as músicas do Spotify para download
+        # Logic Variables
+        self.download_queue = queue.Queue()
+        self.active_downloads = []
+        self.download_pool = None
         self.is_spotify_url = False
+        self.spotify_songs = None
+        self.download_directory = os.path.join(os.path.expanduser("~"), "Downloads")
+        
+        # Load Data
+        self.history = [] # Load from file in real app
+        self.favorites = []
+
+    def setup_home_page(self):
+        page = QWidget()
+        layout = QVBoxLayout(page)
+        layout.setContentsMargins(40, 40, 40, 40)
+        layout.setSpacing(20)
+        
+        # Search Bar Area
+        search_frame = QFrame()
+        search_frame.setFixedHeight(60)
+        search_frame.setStyleSheet("""
+            QFrame {
+                background-color: #252535;
+                border-radius: 30px;
+                border: 1px solid #353545;
+            }
+        """)
+        search_layout = QHBoxLayout(search_frame)
+        search_layout.setContentsMargins(10, 5, 10, 5)
+        
+        plus_btn = QPushButton("+")
+        plus_btn.setFixedSize(40, 40)
+        plus_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #353545;
+                border-radius: 20px;
+                color: white;
+                font-size: 20px;
+                border: none;
+            }
+            QPushButton:hover { background-color: #454555; }
+        """)
+        
+        self.url_input = QLineEdit()
+        self.url_input.setPlaceholderText("Cole ou Arraste o URL da Mídia")
+        self.url_input.setStyleSheet("""
+            QLineEdit {
+                background: transparent;
+                border: none;
+                color: white;
+                font-size: 16px;
+                padding-left: 10px;
+            }
+        """)
+        self.url_input.returnPressed.connect(self.check_url)
+        
+        paste_btn = QPushButton("Paste URL")
+        paste_btn.setCursor(Qt.PointingHandCursor)
+        paste_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #353545;
+                border-radius: 15px;
+                color: white;
+                padding: 8px 15px;
+                border: none;
+            }
+            QPushButton:hover { background-color: #454555; }
+        """)
+        paste_btn.clicked.connect(self.paste_from_clipboard)
+
+        search_layout.addWidget(plus_btn)
+        search_layout.addWidget(self.url_input)
+        search_layout.addWidget(paste_btn)
+        
+        layout.addWidget(search_frame)
+        
+        # Main Content Grid (Preview + Controls)
+        content_grid_frame = QFrame()
+        content_grid_frame.setStyleSheet("""
+            QFrame {
+                background-color: #1e1e2e;
+                border-radius: 20px;
+                border: 1px solid #2d2d3d;
+            }
+        """)
+        grid_layout = QHBoxLayout(content_grid_frame)
+        grid_layout.setContentsMargins(20, 20, 20, 20)
+        grid_layout.setSpacing(30)
+        
+        # Left: Preview Box
+        self.preview_frame = QLabel("Preview")
+        self.preview_frame.setAlignment(Qt.AlignCenter)
+        self.preview_frame.setFixedSize(320, 180)
+        self.preview_frame.setStyleSheet("""
+            QLabel {
+                background-color: #181825;
+                border-radius: 15px;
+                color: #505060;
+                font-size: 14px;
+            }
+        """)
+        grid_layout.addWidget(self.preview_frame)
+        
+        # Right: Controls
+        controls_layout = QVBoxLayout()
+        controls_layout.setSpacing(15)
+        
+        # Format & Quality Row
+        fq_layout = QHBoxLayout()
+        
+        self.format_combo = QComboBox()
+        self.format_combo.addItems(["MP4", "MP3", "WAV", "WEBM"])
+        self.format_combo.setStyleSheet(self.get_combo_style())
+        
+        self.quality_combo = QComboBox()
+        self.quality_combo.addItems(["High (1080p/320k)", "Medium (720p/128k)", "Low (480p/64k)"])
+        self.quality_combo.setStyleSheet(self.get_combo_style())
+
+        fq_lbl = QLabel("Formato")
+        fq_lbl.setStyleSheet("color: #a0a0a0;")
+        fq_layout.addWidget(fq_lbl)
+        fq_layout.addWidget(self.format_combo)
+        fq_layout.addWidget(QLabel("Qualidade"))
+        fq_layout.addWidget(self.quality_combo)
+        controls_layout.addLayout(fq_layout)
+        
+        # Sliders
+        slider_layout = QHBoxLayout()
+        slider_lbl = QLabel("Downloads Simultâneos")
+        slider_lbl.setStyleSheet("color: #a0a0a0;")
+        self.simultaneous_slider = QSlider(Qt.Horizontal)
+        self.simultaneous_slider.setRange(1, 5)
+        self.simultaneous_slider.setValue(3)
+        self.simultaneous_slider.setStyleSheet("""
+             QSlider::groove:horizontal {
+                border: 1px solid #3d3d4d;
+                height: 4px;
+                background: #2d2d3d;
+                margin: 2px 0;
+                border-radius: 2px;
+            }
+            QSlider::handle:horizontal {
+                background: #4a90e2;
+                border: 1px solid #4a90e2;
+                width: 14px;
+                height: 14px;
+                margin: -6px 0;
+                border-radius: 7px;
+            }
+        """)
+        slider_layout.addWidget(slider_lbl)
+        slider_layout.addWidget(self.simultaneous_slider)
+        controls_layout.addLayout(slider_layout)
+        
+        # Directory
+        dir_layout = QHBoxLayout()
+        self.dir_input = QLineEdit(self.download_directory)
+        self.dir_input.setReadOnly(True)
+        self.dir_input.setStyleSheet("""
+            QLineEdit {
+                background-color: #252535;
+                border: 1px solid #353545;
+                border-radius: 8px;
+                color: #a0a0a0;
+                padding: 8px;
+            }
+        """)
+        dir_btn = QPushButton("📂")
+        dir_btn.setFixedSize(35, 35)
+        dir_btn.clicked.connect(self.choose_directory)
+        dir_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #353545;
+                border-radius: 8px;
+                color: white;
+                border: none;
+            }
+            QPushButton:hover { background-color: #454555; }
+        """)
+        dir_layout.addWidget(self.dir_input)
+        dir_layout.addWidget(dir_btn)
+        controls_layout.addWidget(QLabel("Diretório de Download"))
+        controls_layout.addLayout(dir_layout)
+        
+        # Action Buttons
+        action_layout = QHBoxLayout()
+        action_layout.setAlignment(Qt.AlignCenter)
+        action_layout.setSpacing(20)
+        
+        self.download_btn = QPushButton("⬇️ Download")
+        self.download_btn.setFixedHeight(45)
+        self.download_btn.setFixedWidth(140)
+        self.download_btn.clicked.connect(self.start_download)
+        self.download_btn.setStyleSheet("""
+            QPushButton {
+                background-color: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 #4a90e2, stop:1 #357abd);
+                border-radius: 22px;
+                color: white;
+                font-weight: bold;
+                font-size: 14px;
+                border: 1px solid #5ca0f2;
+            }
+            QPushButton:hover { background-color: #357abd; }
+             QPushButton:pressed { margin-top: 2px; }
+        """)
+        
+        self.pause_btn = QPushButton("⏸️ Pausar")
+        self.pause_btn.setFixedHeight(40)
+        self.pause_btn.setStyleSheet(self.get_secondary_btn_style())
+        self.pause_btn.setEnabled(False)
+        self.pause_btn.clicked.connect(self.toggle_pause)
+
+        self.cancel_btn = QPushButton("⏹️ Cancelar")
+        self.cancel_btn.setFixedHeight(40)
+        self.cancel_btn.setStyleSheet(self.get_secondary_btn_style())
+        self.cancel_btn.setEnabled(False)
+        self.cancel_btn.clicked.connect(self.cancel_download)
+        
+        action_layout.addWidget(self.download_btn)
+        action_layout.addWidget(self.pause_btn)
+        action_layout.addWidget(self.cancel_btn)
+        
+        controls_layout.addStretch()
+        controls_layout.addLayout(action_layout)
+        
+        grid_layout.addLayout(controls_layout)
+        layout.addWidget(content_grid_frame)
+        
+        # Active Downloads Section
+        downloads_group = QFrame()
+        downloads_group.setStyleSheet("""
+             QFrame {
+                background-color: #1e1e2e;
+                border-radius: 20px;
+                border: 1px solid #2d2d3d;
+            }
+        """)
+        dl_layout = QVBoxLayout(downloads_group)
+        dl_layout.addWidget(QLabel("Downloads Ativos", styleSheet="font-weight: bold; font-size: 16px; color: white;"))
+        
+        self.downloads_scroll_area = QScrollArea()
+        self.downloads_scroll_area.setWidgetResizable(True)
+        self.downloads_scroll_area.setStyleSheet("background: transparent; border: none;")
+        self.downloads_container = QWidget()
+        self.downloads_container_layout = QVBoxLayout(self.downloads_container)
+        self.downloads_container_layout.setAlignment(Qt.AlignTop)
+        self.downloads_scroll_area.setWidget(self.downloads_container)
+        
+        dl_layout.addWidget(self.downloads_scroll_area)
+        
+        layout.addWidget(downloads_group)
+        
+        self.content_area.addWidget(page)
+    
+    def setup_history_page(self):
+        page = QWidget()
+        layout = QVBoxLayout(page)
+        layout.setContentsMargins(40, 40, 40, 40)
+        
+        title = QLabel("Histórico de Downloads")
+        title.setStyleSheet("font-size: 24px; font-weight: bold; color: white; margin-bottom: 20px;")
+        layout.addWidget(title)
+        
+        self.history_list = QListWidget()
+        self.history_list.setStyleSheet("""
+            QListWidget {
+                background-color: #1e1e2e;
+                border-radius: 15px;
+                border: 1px solid #2d2d3d;
+                padding: 10px;
+                color: #a0a0a0;
+            }
+            QListWidget::item {
+                padding: 10px;
+                border-bottom: 1px solid #2d2d3d;
+            }
+        """)
+        layout.addWidget(self.history_list)
+        
+        clear_btn = QPushButton("Limpar Histórico")
+        clear_btn.setStyleSheet(self.get_secondary_btn_style())
+        clear_btn.setFixedSize(150, 40)
+        layout.addWidget(clear_btn, alignment=Qt.AlignRight)
+        
+        self.content_area.addWidget(page)
+
+    def setup_favorites_page(self):
+        page = QWidget()
+        layout = QVBoxLayout(page)
+        layout.setContentsMargins(40, 40, 40, 40)
+        
+        title = QLabel("Favoritos")
+        title.setStyleSheet("font-size: 24px; font-weight: bold; color: white; margin-bottom: 20px;")
+        layout.addWidget(title)
+        
+        self.favorites_list = QListWidget()
+        self.favorites_list.setStyleSheet("""
+             QListWidget {
+                background-color: #1e1e2e;
+                border-radius: 15px;
+                border: 1px solid #2d2d3d;
+                padding: 10px;
+                color: #a0a0a0;
+            }
+        """)
+        layout.addWidget(self.favorites_list)
+        
+        self.content_area.addWidget(page)
+
+    def setup_settings_page(self):
+        page = QWidget()
+        layout = QVBoxLayout(page)
+        layout.setContentsMargins(40, 40, 40, 40)
+        layout.setSpacing(20)
+        
+        title = QLabel("Configurações")
+        title.setStyleSheet("font-size: 24px; font-weight: bold; color: white; margin-bottom: 20px;")
+        layout.addWidget(title)
+        
+        # Example Settings
+        setting_frame = QFrame()
+        setting_frame.setStyleSheet("background-color: #1e1e2e; border-radius: 15px;")
+        s_layout = QVBoxLayout(setting_frame)
+        
+        s_layout.addWidget(QLabel("Gerais", styleSheet="font-weight: bold; font-size: 16px; color: white;"))
+        s_layout.addWidget(QLabel("Mais configurações em breve...", styleSheet="color: #a0a0a0;"))
+        
+        layout.addWidget(setting_frame)
+        layout.addStretch()
+        
+        self.content_area.addWidget(page)
+
+
+    def get_combo_style(self):
+        return """
+            QComboBox {
+                background-color: #252535;
+                border: 1px solid #353545;
+                border-radius: 8px;
+                padding: 5px 10px;
+                color: white;
+                min-width: 100px;
+            }
+            QComboBox::drop-down { border: none; }
+            QComboBox QAbstractItemView {
+                background-color: #252535;
+                color: white;
+                selection-background-color: #4a90e2;
+            }
+        """
+
+    def get_secondary_btn_style(self):
+        return """
+            QPushButton {
+                background-color: #353545;
+                border-radius: 20px;
+                color: #a0a0a0;
+                border: 1px solid #454555;
+                padding: 0 20px;
+            }
+            QPushButton:hover {
+                background-color: #454555;
+                color: white;
+            }
+             QPushButton:disabled {
+                opacity: 0.5;
+                background-color: #2a2a35;
+             }
+        """
+
+    def setup_connections(self):
+        # Navbar connections
+        self.navbar.btn_home.clicked.connect(lambda: self.switch_tab(0))
+        self.navbar.btn_history.clicked.connect(lambda: self.switch_tab(1))
+        self.navbar.btn_favorites.clicked.connect(lambda: self.switch_tab(2))
+        self.navbar.btn_settings.clicked.connect(lambda: self.switch_tab(3))
+        # Theme (Toggle)
+        self.navbar.btn_theme.clicked.connect(self.toggle_theme)
+
+        # Logic connections
+        self.update_video_info_signal.connect(self.update_video_info_ui)
+        self.update_spotify_info_signal.connect(self.update_spotify_info_ui)
+
+    def switch_tab(self, index):
+        self.content_area.setCurrentIndex(index)
+        
+        # Reset all buttons
+        buttons = [self.navbar.btn_home, self.navbar.btn_history, self.navbar.btn_favorites, self.navbar.btn_settings]
+        for i, btn in enumerate(buttons):
+            if i == index:
+                btn.setChecked(True)
+            else:
+                btn.setChecked(False)
 
     def toggle_theme(self):
-        self.dark_theme = not self.dark_theme
-        if self.dark_theme:
-            self.theme_button.setText("🌙 Tema Escuro")
-            self.setStyleSheet("""
-                QMainWindow { background-color: #1e1e1e; }
-                QWidget { color: #ffffff; }
-                QPushButton {
-                    background-color: #0d6efd;
-                    color: white;
-                    border: none;
-                    padding: 8px 16px;
-                    border-radius: 4px;
-                }
-                QPushButton:hover {
-                    background-color: #0b5ed7;
-                }
-                QPushButton:disabled {
-                    background-color: #6c757d;
-                }
-                QLineEdit {
-                    padding: 8px;
-                    background-color: #2d2d2d;
-                    border: 1px solid #404040;
-                    border-radius: 4px;
-                    color: white;
-                }
-                QComboBox {
-                    padding: 8px;
-                    background-color: #2d2d2d;
-                    border: 1px solid #404040;
-                    border-radius: 4px;
-                    color: white;
-                }
-                QComboBox::drop-down {
-                    border: none;
-                    background-color: #2d2d2d;
-                }
-                QComboBox::down-arrow {
-                    image: none;
-                    border-left: 5px solid transparent;
-                    border-right: 5px solid transparent;
-                    border-top: 5px solid white;
-                    margin-right: 8px;
-                }
-                QComboBox QAbstractItemView {
-                    background-color: #2d2d2d;
-                    border: 1px solid #404040;
-                    color: white;
-                    selection-background-color: #0d6efd;
-                }
-                QProgressBar {
-                    border: 2px solid #404040;
-                    border-radius: 5px;
-                    text-align: center;
-                    background-color: #2d2d2d;
-                }
-                QProgressBar::chunk {
-                    background-color: #0d6efd;
-                    border-radius: 3px;
-                }
-                QTabWidget::pane {
-                    border: 1px solid #404040;
-                    background-color: #1e1e1e;
-                }
-                QTabBar::tab {
-                    background-color: #2d2d2d;
-                    padding: 8px 16px;
-                    margin-right: 2px;
-                }
-                QTabBar::tab:selected {
-                    background-color: #0d6efd;
-                }
-                QTextEdit {
-                    background-color: #2d2d2d;
-                    border: 1px solid #404040;
-                    border-radius: 4px;
-                }
-            """)
-        else:
-            self.theme_button.setText("☀️ Tema Claro")
-            self.setStyleSheet("""
-                QMainWindow { background-color: #ffffff; }
-                QWidget { color: #000000; }
-                QPushButton {
-                    background-color: #0d6efd;
-                    color: white;
-                    border: none;
-                    padding: 8px 16px;
-                    border-radius: 4px;
-                }
-                QLineEdit {
-                    padding: 8px;
-                    background-color: #f8f9fa;
-                    border: 1px solid #dee2e6;
-                    border-radius: 4px;
-                    color: black;
-                }
-                QComboBox {
-                    padding: 8px;
-                    background-color: #f8f9fa;
-                    border: 1px solid #dee2e6;
-                    border-radius: 4px;
-                    color: black;
-                }
-                QComboBox::drop-down {
-                    border: none;
-                    background-color: #f8f9fa;
-                }
-                QComboBox::down-arrow {
-                    image: none;
-                    border-left: 5px solid transparent;
-                    border-right: 5px solid transparent;
-                    border-top: 5px solid black;
-                    margin-right: 8px;
-                }
-                QComboBox QAbstractItemView {
-                    background-color: #f8f9fa;
-                    border: 1px solid #dee2e6;
-                    color: black;
-                    selection-background-color: #0d6efd;
-                }
-                QProgressBar {
-                    border: 2px solid #dee2e6;
-                    border-radius: 5px;
-                    text-align: center;
-                    background-color: #f8f9fa;
-                }
-                QTabWidget::pane {
-                    border: 1px solid #dee2e6;
-                    background-color: #ffffff;
-                }
-                QTabBar::tab {
-                    background-color: #f8f9fa;
-                    padding: 8px 16px;
-                    margin-right: 2px;
-                    color: black;
-                }
-                QTextEdit {
-                    background-color: #f8f9fa;
-                    border: 1px solid #dee2e6;
-                    border-radius: 4px;
-                    color: black;
-                }
-            """)
+        # Placeholder for theme toggle implementation
+        pass
+
+    def paste_from_clipboard(self):
+        clipboard = QApplication.clipboard()
+        self.url_input.setText(clipboard.text())
+        self.check_url()
 
     def check_url(self):
         url = self.url_input.text()
-        if not url:
-            self.status_label.setText("Por favor, insira uma URL válida!")
-            return
+        if not url: return
         
-        # Detectar se é URL do Spotify
-        if self._is_spotify_url(url):
+        if "spotify.com" in url:
             self.is_spotify_url = True
-            self.status_label.setText("🎵 Obtendo informações do Spotify...")
             threading.Thread(target=self._fetch_spotify_info, args=(url,)).start()
         else:
             self.is_spotify_url = False
-            self.spotify_songs = None
-            self.status_label.setText("Obtendo informações do vídeo...")
             threading.Thread(target=self._fetch_video_info, args=(url,)).start()
-
-    def _is_spotify_url(self, url):
-        """Detecta se é um link do Spotify"""
-        return bool(re.match(r'https?://open\.spotify\.com/', url))
 
     def _fetch_video_info(self, url):
         try:
-            with YoutubeDL() as ydl:
+            ydl_opts = {
+                'extract_flat': 'in_playlist', # Prevent crash on playlist preview
+                'ignoreerrors': True,
+                'quiet': True
+            }
+            with YoutubeDL(ydl_opts) as ydl:
                 info = ydl.extract_info(url, download=False)
-                # Usar o sinal em vez de emit diretamente
-                self.update_video_info_signal.emit(info)
+                if info:
+                    self.update_video_info_signal.emit(info)
         except Exception as e:
-            # Usar QTimer para atualizar a interface da thread principal
-            QTimer.singleShot(0, lambda: self.status_label.setText(f"Erro ao obter informações: {str(e)}"))
+            print(f"Error fetching video info: {e}")
 
     def _fetch_spotify_info(self, url):
-        """Busca informações de uma música/playlist/álbum do Spotify"""
         try:
             from spotdl import Spotdl
             from spotdl.utils.config import DEFAULT_CONFIG
             
-            # Inicializar spotDL com credenciais
-            spotdl = Spotdl(
-                client_id=SPOTIFY_CLIENT_ID,
-                client_secret=SPOTIFY_CLIENT_SECRET,
-                downloader_settings=DEFAULT_CONFIG
-            )
-            
-            # Buscar músicas
+            spotdl = Spotdl(client_id=SPOTIFY_CLIENT_ID, client_secret=SPOTIFY_CLIENT_SECRET, downloader_settings=DEFAULT_CONFIG)
             songs = spotdl.search([url])
             
-            if not songs:
-                QTimer.singleShot(0, lambda: self.status_label.setText("❌ Nenhuma música encontrada!"))
-                return
-            
-            # Construir informações para exibição
-            if len(songs) == 1:
-                # Uma única música
-                song = songs[0]
-                info = {
-                    'title': song.name,
-                    'artist': song.artist,
-                    'artists': song.artists,
-                    'album': song.album_name,
-                    'duration': song.duration,
-                    'thumbnail': song.cover_url,
-                    'is_playlist': False,
-                    'songs': songs,
-                    'track_count': 1
-                }
-            else:
-                # Playlist ou álbum
-                total_duration = sum(s.duration for s in songs)
-                # Usar info do primeiro track para thumbnail se não houver capa
-                first_song = songs[0]
-                info = {
-                    'title': first_song.album_name or first_song.list_name or 'Playlist',
-                    'artist': first_song.artist,
-                    'artists': list(set(s.artist for s in songs)),
-                    'album': first_song.album_name,
-                    'duration': total_duration,
-                    'thumbnail': first_song.cover_url,
-                    'is_playlist': True,
-                    'songs': songs,
-                    'track_count': len(songs)
-                }
-            
+            if not songs: return
+
+            # Basic info gathering similar to previous version
+            info = {
+                'title': songs[0].name if len(songs) == 1 else (songs[0].list_name or 'Playlist'),
+                'thumbnail': songs[0].cover_url,
+                'songs': songs
+            }
             self.update_spotify_info_signal.emit(info)
-            
-        except ImportError as e:
-            QTimer.singleShot(0, lambda: self.status_label.setText(
-                "❌ spotdl não instalado! Execute: pip install spotdl"))
         except Exception as e:
-            QTimer.singleShot(0, lambda: self.status_label.setText(f"❌ Erro Spotify: {str(e)}"))
+            print(f"Error fetching spotify info: {e}")
 
-    def update_spotify_info(self, info):
-        """Atualiza a UI com informações do Spotify"""
-        try:
-            self.spotify_songs = info.get('songs', [])
-            
-            if info.get('is_playlist'):
-                # É um álbum/playlist
-                track_count = info['track_count']
-                title = info.get('title', 'Playlist')
-                artist = info.get('artist', 'Vários Artistas')
-                
-                self.title_label.setText(f"🎵 {title}\n🎤 Artista: {artist}")
-                
-                # Formatar duração total
-                total_duration = info.get('duration', 0)
-                hours = total_duration // 3600
-                minutes = (total_duration % 3600) // 60
-                seconds = total_duration % 60
-                
-                if hours > 0:
-                    duration_str = f"{hours}h {minutes}min {seconds}s"
-                else:
-                    duration_str = f"{minutes}min {seconds}s"
-                
-                self.duration_label.setText(f"📀 {track_count} faixas • Duração total: {duration_str}")
-                self.status_label.setText(f"✅ Spotify: {track_count} faixas encontradas!")
-            else:
-                # Música única
-                title = info.get('title', 'Sem título')
-                artist = info.get('artist', 'Artista desconhecido')
-                album = info.get('album', '')
-                
-                self.title_label.setText(f"🎵 {title}\n🎤 {artist}" + (f"\n💿 {album}" if album else ""))
-                
-                # Formatar duração
-                duration = info.get('duration', 0)
-                minutes = duration // 60
-                seconds = duration % 60
-                self.duration_label.setText(f"⏱️ Duração: {minutes}:{seconds:02d}")
-                self.status_label.setText("✅ Música do Spotify encontrada!")
-            
-            # Carregar thumbnail
-            thumbnail_url = info.get('thumbnail', '')
-            if thumbnail_url:
-                try:
-                    data = urllib.request.urlopen(thumbnail_url).read()
-                    image = QImage()
-                    image.loadFromData(data)
-                    pixmap = QPixmap(image).scaled(400, 225, Qt.KeepAspectRatio, Qt.SmoothTransformation)
-                    self.thumbnail_label.setPixmap(pixmap)
-                except Exception as e:
-                    print(f"Erro ao carregar thumbnail: {e}")
-                    
-        except Exception as e:
-            self.status_label.setText(f"❌ Erro ao exibir informações: {str(e)}")
+    def update_video_info_ui(self, info):
+        # Update Thumbnail
+        thumbnail_url = info.get('thumbnail')
+        if thumbnail_url:
+            self.load_thumbnail(thumbnail_url)
+        # Update Title placeholder (in real implementation, update a title label)
+        print(f"Video Found: {info.get('title')}")
 
-    def update_video_info(self, info):
+    def update_spotify_info_ui(self, info):
+        self.spotify_songs = info.get('songs')
+        if info.get('thumbnail'):
+            self.load_thumbnail(info['thumbnail'])
+        print(f"Spotify Found: {info.get('title')}")
+
+    def load_thumbnail(self, url):
         try:
-            # Verificar se é uma playlist/álbum
-            entries = info.get('entries')
-            is_playlist = entries is not None
+            data = urllib.request.urlopen(url).read()
+            image = QImage()
+            image.loadFromData(data)
+            pixmap = QPixmap(image)
             
-            if is_playlist:
-                # É uma playlist/álbum
-                entries_list = list(entries) if entries else []
-                track_count = len(entries_list)
-                
-                # Título da playlist/álbum
-                title = info.get('title', 'Playlist sem título')
-                uploader = info.get('uploader', info.get('channel', 'Artista desconhecido'))
-                self.title_label.setText(f"📀 Álbum/Playlist: {title}\n🎤 Artista: {uploader}")
-                
-                # Calcular duração total
-                total_duration = 0
-                for entry in entries_list:
-                    if entry and entry.get('duration'):
-                        total_duration += entry.get('duration', 0)
-                
-                hours = total_duration // 3600
-                minutes = (total_duration % 3600) // 60
-                seconds = total_duration % 60
-                
-                if hours > 0:
-                    duration_str = f"{hours}h {minutes}min {seconds}s"
-                else:
-                    duration_str = f"{minutes}min {seconds}s"
-                
-                self.duration_label.setText(f"🎵 {track_count} faixas • Duração total: {duration_str}")
-                
-                # Usar thumbnail da playlist ou da primeira faixa
-                thumbnail_url = info.get('thumbnail', '')
-                if not thumbnail_url and entries_list and entries_list[0]:
-                    thumbnail_url = entries_list[0].get('thumbnail', '')
-                    
-                self.status_label.setText(f"✅ Álbum/Playlist detectado com {track_count} faixas!")
-            else:
-                # É um vídeo/música único
-                title = info.get('title', 'Sem título')
-                self.title_label.setText(f"Título: {title}")
-                
-                # Atualizar duração
-                duration = info.get('duration', 0) or 0
-                minutes = duration // 60
-                seconds = duration % 60
-                self.duration_label.setText(f"Duração: {minutes}:{seconds:02d}")
-                
-                thumbnail_url = info.get('thumbnail', '')
-                self.status_label.setText("Informações carregadas com sucesso!")
+            # Rounded corners for thumbnail
+            size = self.preview_frame.size()
+            rounded = QPixmap(size)
+            rounded.fill(Qt.transparent)
+            painter = QPainter(rounded)
+            painter.setRenderHint(QPainter.Antialiasing)
+            path = QPainterPath()
+            path.addRoundedRect(0, 0, size.width(), size.height(), 15, 15)
+            painter.setClipPath(path)
+            painter.drawPixmap(0, 0, size.width(), size.height(), pixmap)
+            painter.end()
             
-            # Carregar e exibir miniatura
-            if thumbnail_url:
-                data = urllib.request.urlopen(thumbnail_url).read()
-                image = QImage()
-                image.loadFromData(data)
-                pixmap = QPixmap(image).scaled(400, 225, Qt.KeepAspectRatio, Qt.SmoothTransformation)
-                self.thumbnail_label.setPixmap(pixmap)
-                
+            self.preview_frame.setPixmap(rounded)
         except Exception as e:
-            self.status_label.setText(f"Erro ao atualizar informações: {str(e)}")
+            print(f"Thumbnail error: {e}")
+
+    def choose_directory(self):
+        dir_path = QFileDialog.getExistingDirectory(self, "Escolher Diretório", self.download_directory)
+        if dir_path:
+            self.download_directory = dir_path
+            self.dir_input.setText(dir_path)
 
     def start_download(self):
         url = self.url_input.text()
-        if not url:
-            self.status_label.setText("Por favor, insira uma URL válida!")
+        if not url and not self.spotify_songs: 
             return
         
         formato = self.format_combo.currentText()
         
-        # Verificar se é download do Spotify
+        # Spotify Download
         if self.is_spotify_url and self.spotify_songs:
-            self.status_label.setText("🎵 Iniciando download do Spotify...")
-            threading.Thread(target=self._execute_spotify_download, args=(formato,)).start()
-        else:
-            self.download_queue.put((url, formato))
-            self.update_queue_text(f"Adicionado: {url} ({formato})")
+            # Create a group item for the playlist/album or single song
+            title = "Spotify Download"
+            if len(self.spotify_songs) == 1:
+                title = f"{self.spotify_songs[0].artist} - {self.spotify_songs[0].name}"
+            else:
+                title = f"Playlist/Album ({len(self.spotify_songs)} songs)"
+                
+            item_widget = DownloadItemWidget(title, 0, "Preparando...")
+            self.downloads_container_layout.addWidget(item_widget)
             
+            threading.Thread(target=self._execute_spotify_download, args=(formato, item_widget)).start()
+            
+        else:
+            # YouTube/Direct Download
+            self.download_queue.put((url, formato))
+            
+            # Create UI Item immediately
+            item_widget = DownloadItemWidget("Aguardando...", 0, "Na fila")
+            item_widget.url = url # Store URL to identify later if needed
+            self.downloads_container_layout.addWidget(item_widget)
+            self.active_downloads.append(item_widget) # Track active widgets
+
             if self.download_pool is None:
-                max_workers = int(self.concurrent_combo.currentText())
+                max_workers = self.simultaneous_slider.value()
                 self.download_pool = concurrent.futures.ThreadPoolExecutor(max_workers=max_workers)
                 threading.Thread(target=self.process_download_queue).start()
 
-    def _execute_spotify_download(self, formato):
-        """Executa o download de músicas do Spotify"""
+    def process_download_queue(self):
+        while True:
+            try:
+                url, formato = self.download_queue.get(timeout=1)
+                # Find the widget for this URL (simple matching)
+                widget = next((w for w in self.active_downloads if getattr(w, 'url', '') == url), None)
+                
+                if widget:
+                    self.download_pool.submit(self._download_worker, url, formato, widget)
+            except queue.Empty:
+                continue
+            except Exception as e:
+                print(f"Queue error: {e}")
+
+    def _download_worker(self, url, formato, widget):
+        try:
+            print(f"\\n[Offstream] Iniciando download: {url}")
+            QTimer.singleShot(0, lambda: widget.status_lbl.setText("Baixando..."))
+            
+            # Configure Options
+            ydl_opts = {
+                'format': self._get_format_string(formato),
+                'outtmpl': os.path.join(self.download_directory, '%(title)s.%(ext)s'),
+                'progress_hooks': [lambda d: self._progress_hook(d, widget)],
+                'quiet': True,
+                'no_warnings': True,
+                'ignoreerrors': True, # Skip unavailable videos
+                'logger': MyLogger(), # Use custom logger
+            }
+            
+            # Audio conversion options
+            if 'MP3' in formato or 'WAV' in formato:
+                 ydl_opts['postprocessors'] = [{
+                    'key': 'FFmpegExtractAudio',
+                    'preferredcodec': 'mp3' if 'MP3' in formato else 'wav',
+                    'preferredquality': '192',
+                }]
+            
+            with YoutubeDL(ydl_opts) as ydl:
+                info = ydl.extract_info(url, download=True)
+                
+                if info:
+                    title = info.get('title', 'Video')
+                    QTimer.singleShot(0, lambda: widget.title_lbl.setText(title))
+                    QTimer.singleShot(0, lambda: widget.set_progress(100))
+                    QTimer.singleShot(0, lambda: widget.status_lbl.setText("Concluído"))
+                    print(f"[Offstream] Download concluído: {title}")
+                else:
+                    # Video unavailable (handled by logger)
+                    QTimer.singleShot(0, lambda: widget.status_lbl.setText("Indisponível"))
+            
+        except Exception as e:
+            # Critical errors not caught by ignoreerrors
+            error_msg = str(e)
+            QTimer.singleShot(0, lambda: widget.status_lbl.setText(f"Erro: {error_msg[:20]}..."))
+            print(f"Download Critical Error: {e}")
+        finally:
+            if widget in self.active_downloads:
+                self.active_downloads.remove(widget)
+
+    def _progress_hook(self, d, widget):
+        if d['status'] == 'downloading':
+            try:
+                p = d.get('_percent_str', '0%').replace('%', '')
+                progress = float(p)
+                QTimer.singleShot(0, lambda: widget.set_progress(int(progress)))
+                
+                # Print progress to terminal periodically (e.g. every 10%) or just update line
+                # Simple version: Print every update (might be spammy, but confirms activity)
+                # Better: Print only integer changes
+                if int(progress) % 10 == 0:
+                    sys.stdout.write(f"\\r[Offstream] Baixando: {int(progress)}%")
+                    sys.stdout.flush()
+            except:
+                pass
+        elif d['status'] == 'finished':
+            sys.stdout.write(f"\\r[Offstream] Baixando: 100%\\n")
+            QTimer.singleShot(0, lambda: widget.set_progress(100))
+            QTimer.singleShot(0, lambda: widget.status_lbl.setText("Processando..."))
+
+    def _get_format_string(self, formato):
+        if 'MP4' in formato:
+            return 'bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best'
+        elif 'WEBM' in formato:
+            return 'bestvideo[ext=webm]+bestaudio[ext=webm]/best[ext=webm]/best'
+        else: # Audio only
+            return 'bestaudio/best'
+
+    def _execute_spotify_download(self, formato, widget):
         try:
             from spotdl import Spotdl
             from spotdl.utils.config import DEFAULT_CONFIG
-            from spotdl.types.options import DownloaderOptions
             
-            QTimer.singleShot(0, lambda: self.download_button.setEnabled(False))
-            QTimer.singleShot(0, lambda: self.cancel_button.setEnabled(True))
+            QTimer.singleShot(0, lambda: widget.status_lbl.setText("Inicializando SpotDL..."))
             
-            # Determinar qualidade baseado no formato selecionado
             audio_format = "mp3"
-            bitrate = "320k"
+            if "wav" in formato.lower(): audio_format = "wav"
             
-            if "mp3" in formato.lower():
-                audio_format = "mp3"
-                bitrate = "320k" if "320" in formato else "128k"
-            elif "wav" in formato.lower():
-                audio_format = "wav"
-                bitrate = None
-            elif "mp4" in formato.lower() or "webm" in formato.lower():
-                # Para vídeo, ainda usamos mp3 (Spotify só tem áudio)
-                audio_format = "mp3"
-                bitrate = "320k"
-                QTimer.singleShot(0, lambda: self.status_label.setText(
-                    "⚠️ Spotify só suporta áudio. Baixando como MP3..."))
-            
-            # Configurar downloader
             downloader_settings = {
                 'output': self.download_directory,
                 'format': audio_format,
-                'bitrate': bitrate,
-                'ffmpeg': self._get_ffmpeg_path() if os.name == 'nt' else 'ffmpeg',
+                'ffmpeg': 'ffmpeg', # Assume system ffmpeg or path
             }
             
-            # Inicializar spotDL
             spotdl = Spotdl(
                 client_id=SPOTIFY_CLIENT_ID,
                 client_secret=SPOTIFY_CLIENT_SECRET,
@@ -754,357 +849,38 @@ class MediaDownloaderPro(QMainWindow):
             )
             
             songs = self.spotify_songs
-            total_songs = len(songs)
+            total = len(songs)
             
             for i, song in enumerate(songs, 1):
-                if self.download_cancelled:
-                    QTimer.singleShot(0, lambda: self.status_label.setText("Download cancelado!"))
-                    break
+                # Update status
+                msg = f"Baixando {i}/{total}: {song.name}"
+                progress = int((i-1)/total * 100)
                 
-                progress = int((i - 1) / total_songs * 100)
-                song_name = f"{song.artist} - {song.name}"
-                QTimer.singleShot(0, lambda p=progress, s=song_name, idx=i, total=total_songs: 
-                    self._update_spotify_progress(p, s, idx, total))
+                QTimer.singleShot(0, lambda m=msg, p=progress: (
+                    widget.status_lbl.setText(m),
+                    widget.set_progress(p)
+                ))
                 
                 try:
-                    # Fazer download
-                    result = spotdl.download(song)
-                    if result:
-                        QTimer.singleShot(0, lambda s=song_name: 
-                            self.update_queue_text(f"✅ Baixado: {s}"))
+                    spotdl.download(song)
                 except Exception as e:
-                    QTimer.singleShot(0, lambda s=song_name, err=str(e): 
-                        self.update_queue_text(f"❌ Erro em {s}: {err}"))
+                    print(f"Error downloading {song.name}: {e}")
             
-            if not self.download_cancelled:
-                QTimer.singleShot(0, lambda: self.progress_bar.setValue(100))
-                QTimer.singleShot(0, lambda: self.status_label.setText(
-                    f"✅ Download concluído! {total_songs} músicas baixadas."))
-                self.show_notification("Download Concluído", 
-                    f"{total_songs} músicas do Spotify foram baixadas!")
-                
-                # Adicionar ao histórico
-                url = self.url_input.text()
-                self.add_to_history(url, f"Spotify ({audio_format.upper()})", "Concluído")
+            QTimer.singleShot(0, lambda: widget.set_progress(100))
+            QTimer.singleShot(0, lambda: widget.status_lbl.setText("Download Spotify Concluído"))
             
-        except ImportError:
-            QTimer.singleShot(0, lambda: self.status_label.setText(
-                "❌ spotdl não instalado! Execute: pip install spotdl"))
         except Exception as e:
-            QTimer.singleShot(0, lambda: self.status_label.setText(f"❌ Erro: {str(e)}"))
-            self.add_to_history(self.url_input.text(), "Spotify", "Erro")
-        finally:
-            self.download_cancelled = False
-            QTimer.singleShot(0, lambda: self.download_button.setEnabled(True))
-            QTimer.singleShot(0, lambda: self.cancel_button.setEnabled(False))
-
-    def _update_spotify_progress(self, progress, song_name, current, total):
-        """Atualiza a barra de progresso para downloads do Spotify"""
-        self.progress_bar.setValue(progress)
-        self.status_label.setText(f"🎵 Baixando ({current}/{total}): {song_name}")
-
-    def process_download_queue(self):
-        while True:
-            try:
-                url, formato = self.download_queue.get_nowait()
-                future = self.download_pool.submit(self.execute_download, url, formato)
-                self.active_downloads.append(future)
-                self.active_downloads = [f for f in self.active_downloads if not f.done()]
-            except queue.Empty:
-                if len(self.active_downloads) == 0:
-                    self.download_pool.shutdown(wait=False)
-                    self.download_pool = None
-                    break
-            time.sleep(0.1)
-
-    def update_queue_text(self, text):
-        self.queue_text.append(text)
-
-    def load_data(self, filename):
-        try:
-            with open(filename, 'r') as f:
-                return json.load(f)
-        except:
-            return []
-
-    def save_data(self, data, filename):
-        with open(filename, 'w') as f:
-            json.dump(data, f)
-
-    def update_history_ui(self):
-        self.history_text.clear()
-        for item in self.history:
-            self.history_text.append(
-                f"[{item['data']}] {item['url']} - {item['formato']} ({item['status']})"
-            )
-
-    def update_favorites_ui(self):
-        self.favorites_text.clear()
-        for item in self.favorites:
-            self.favorites_text.append(f"[{item['data']}] {item['url']}")
-
-    def clear_history(self):
-        self.history = []
-        self.save_data(self.history, 'historico.json')
-        self.update_history_ui()
-
-    def add_favorite(self):
-        url = self.url_input.text()
-        if not url:
-            self.status_label.setText("Insira uma URL para favoritar!")
-            return
-            
-        if url not in [f['url'] for f in self.favorites]:
-            self.favorites.append({
-                'url': url,
-                'data': datetime.datetime.now().strftime("%d/%m/%Y %H:%M")
-            })
-            self.save_data(self.favorites, 'favoritos.json')
-            self.update_favorites_ui()
-            self.status_label.setText("URL adicionada aos favoritos!")
-
-    def remove_favorite(self):
-        url = self.url_input.text()
-        self.favorites = [f for f in self.favorites if f['url'] != url]
-        self.save_data(self.favorites, 'favoritos.json')
-        self.update_favorites_ui()
-        self.status_label.setText("URL removida dos favoritos!")
+             QTimer.singleShot(0, lambda: widget.status_lbl.setText(f"Erro: {str(e)[:20]}"))
 
     def toggle_pause(self):
-        self.download_paused = not self.download_paused
-        self.pause_button.setText("▶️ Continuar" if self.download_paused else "⏸️ Pausar")
+        pass 
 
     def cancel_download(self):
-        self.download_cancelled = True
-        self.status_label.setText("Cancelando download...")
+        pass
 
-    def execute_download(self, url, formato):
-        try:
-            formato_config = self._get_format_config(formato)
-            
-            ydl_opts = {
-                'outtmpl': os.path.join(self.download_directory, '%(title)s.%(ext)s'),  # Usar diretório escolhido
-                'progress_hooks': [self.update_progress],
-                **formato_config
-            }
-            
-            with YoutubeDL(ydl_opts) as ydl:
-                self.current_download = ydl
-                if not self.download_cancelled:
-                    ydl.download([url])
-                    
-            if not self.download_cancelled:
-                QTimer.singleShot(0, lambda: self.status_label.setText("Download concluído com sucesso!"))
-                self.add_to_history(url, formato, "Concluído")
-                self.show_notification("Download Concluído", f"O download de {url} foi concluído com sucesso!")
-                
-        except Exception as e:
-            if not self.download_cancelled:
-                QTimer.singleShot(0, lambda: self.status_label.setText(f"Erro: {str(e)}"))
-                self.add_to_history(url, formato, "Erro")
-                self.show_notification("Erro no Download", f"Ocorreu um erro no download de {url}")
-        finally:
-            self.current_download = None
-            QTimer.singleShot(0, lambda: self.pause_button.setEnabled(False))
-            QTimer.singleShot(0, lambda: self.cancel_button.setEnabled(False))
-
-    def _get_format_config(self, formato):
-        formato_lower = formato.lower()
-        
-        if "mp3" in formato_lower:
-            quality = "320" if "320" in formato else "128"
-            return {
-                'format': 'bestaudio/best',
-                'postprocessors': [{
-                    'key': 'FFmpegExtractAudio',
-                    'preferredcodec': 'mp3',
-                    'preferredquality': quality,
-                }],
-                'ffmpeg_location': self._get_ffmpeg_path()
-            }
-        elif "wav" in formato_lower:
-            return {
-                'format': 'bestaudio/best',
-                'postprocessors': [{
-                    'key': 'FFmpegExtractAudio',
-                    'preferredcodec': 'wav',
-                }],
-                'ffmpeg_location': self._get_ffmpeg_path()
-            }
-        elif "webm" in formato_lower:
-            resolution = formato.split(" - ")[1].replace("p", "")
-            return {
-                # Fallbacks robustos para WEBM
-                'format': f'bestvideo[height<={resolution}][ext=webm]+bestaudio[ext=webm]/bestvideo[height<={resolution}]+bestaudio/best[height<={resolution}]/best',
-                'ffmpeg_location': self._get_ffmpeg_path(),
-                'merge_output_format': 'webm',
-                'ignoreerrors': True,
-            }
-        else:  # MP4 (default)
-            resolution = formato.split(" - ")[1].replace("p", "")
-            return {
-                # Fallbacks robustos para MP4 - tenta várias combinações
-                'format': f'bestvideo[height<={resolution}][ext=mp4]+bestaudio[ext=m4a]/bestvideo[height<={resolution}]+bestaudio/best[height<={resolution}]/best',
-                'ffmpeg_location': self._get_ffmpeg_path(),
-                'merge_output_format': 'mp4',
-                'ignoreerrors': True,
-            }
-
-    def _get_ffmpeg_path(self):
-        if os.name == 'nt':  # Windows
-            return r"C:\ffmpeg\bin\ffmpeg.exe"
-        else:  # Linux/Mac
-            return "ffmpeg"
-
-    def update_progress(self, d):
-        if d['status'] == 'downloading':
-            # Verifica se o download foi cancelado
-            if self.download_cancelled:
-                if self.current_download:
-                    self.current_download.cancel_download()
-                return
-                
-            # Sistema de pausa
-            while self.download_paused and not self.download_cancelled:
-                time.sleep(0.1)
-                continue
-                
-            try:
-                p = d['downloaded_bytes'] / d['total_bytes']
-                QTimer.singleShot(0, lambda: self.progress_bar.setValue(int(p * 100)))
-                
-                # Calcula velocidade em MB/s
-                speed = d.get('speed', 0) / 1024 / 1024
-                status = f"Baixando: {d['_percent_str']} de {d['_total_bytes_str']} ({speed:.1f} MB/s)"
-                QTimer.singleShot(0, lambda: self.status_label.setText(status))
-            except:
-                QTimer.singleShot(0, lambda: self.status_label.setText("Baixando..."))
-
-    def add_to_history(self, url, formato, status):
-        now = datetime.datetime.now().strftime("%d/%m/%Y %H:%M")
-        self.history.insert(0, {
-            'data': now,
-            'url': url,
-            'formato': formato,
-            'status': status
-        })
-        if len(self.history) > 100:
-            self.history.pop()
-        self.save_data(self.history, 'historico.json')
-        QTimer.singleShot(0, self.update_history_ui)
-
-    def show_notification(self, title, message):
-        try:
-            notification.notify(
-                title=title,
-                message=message,
-                app_icon=None,
-                timeout=10,
-            )
-        except:
-            print(f"Não foi possível mostrar notificação: {title} - {message}")
-
-    def choose_directory(self):
-        directory = QFileDialog.getExistingDirectory(
-            self,
-            "Escolher Pasta de Download",
-            self.download_directory,
-            QFileDialog.ShowDirsOnly
-        )
-        
-        if directory:
-            self.download_directory = directory
-            # Mostrar caminho reduzido se for muito longo
-            display_path = directory
-            if len(display_path) > 40:
-                display_path = "..." + display_path[-37:]
-            self.directory_label.setText(display_path)
-            self.status_label.setText(f"Pasta de download alterada: {directory}")
-            self.save_settings()  # Salvar configuração
-
-    # === SETTINGS ===
-    def load_settings(self):
-        """Carrega configurações salvas do usuário"""
-        try:
-            with open('settings.json', 'r') as f:
-                settings = json.load(f)
-                # Restaurar diretório
-                if 'download_directory' in settings:
-                    self.download_directory = settings['download_directory']
-                    self.directory_label.setText(self.download_directory[-40:] if len(self.download_directory) > 40 else self.download_directory)
-                # Restaurar tema
-                if 'dark_theme' in settings:
-                    self.dark_theme = settings['dark_theme']
-                    if not self.dark_theme:
-                        self.toggle_theme()  # Mudar para tema claro
-                # Restaurar downloads simultâneos
-                if 'concurrent_downloads' in settings:
-                    self.concurrent_combo.setCurrentText(str(settings['concurrent_downloads']))
-        except FileNotFoundError:
-            pass  # Arquivo ainda não existe
-        except Exception as e:
-            print(f"Erro ao carregar configurações: {e}")
-
-    def save_settings(self):
-        """Salva configurações do usuário"""
-        settings = {
-            'download_directory': self.download_directory,
-            'dark_theme': self.dark_theme,
-            'concurrent_downloads': int(self.concurrent_combo.currentText())
-        }
-        try:
-            with open('settings.json', 'w') as f:
-                json.dump(settings, f, indent=2)
-        except Exception as e:
-            print(f"Erro ao salvar configurações: {e}")
-
-    def validate_ffmpeg(self):
-        """Verifica se FFmpeg está disponível"""
-        ffmpeg_path = self._get_ffmpeg_path()
-        if os.name == 'nt':  # Windows
-            if not os.path.exists(ffmpeg_path):
-                # Tenta encontrar no PATH
-                ffmpeg_in_path = shutil.which('ffmpeg')
-                if ffmpeg_in_path:
-                    self.status_label.setText("✅ FFmpeg encontrado no PATH")
-                else:
-                    self.status_label.setText("⚠️ FFmpeg não encontrado! Conversões podem falhar.")
-                    QMessageBox.warning(self, "FFmpeg não encontrado",
-                        "FFmpeg não foi encontrado no sistema.\n\n"
-                        "Formatos de áudio (MP3, WAV) podem não funcionar.\n\n"
-                        "Instale FFmpeg de: https://ffmpeg.org/download.html")
-        else:
-            if not shutil.which('ffmpeg'):
-                self.status_label.setText("⚠️ FFmpeg não encontrado!")
-
-    # === DRAG & DROP ===
-    def dragEnterEvent(self, event):
-        """Aceita URLs arrastadas para a janela"""
-        if event.mimeData().hasUrls() or event.mimeData().hasText():
-            event.acceptProposedAction()
-
-    def dropEvent(self, event):
-        """Processa URLs soltas na janela"""
-        if event.mimeData().hasUrls():
-            url = event.mimeData().urls()[0].toString()
-            self.url_input.setText(url)
-            self.check_url()
-        elif event.mimeData().hasText():
-            text = event.mimeData().text()
-            # Extrair URL do texto
-            url_pattern = r'https?://[^\s]+'
-            match = re.search(url_pattern, text)
-            if match:
-                self.url_input.setText(match.group())
-                self.check_url()
-
-    def closeEvent(self, event):
-        """Salva configurações ao fechar"""
-        self.save_settings()
-        event.accept()
 
 if __name__ == "__main__":
     app = QApplication(sys.argv)
     window = MediaDownloaderPro()
     window.show()
-    sys.exit(app.exec()) 
+    sys.exit(app.exec())

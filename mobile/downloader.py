@@ -1,5 +1,5 @@
 """
-MediaDownloader Mobile - Módulo de Download
+Offstream Mobile - Módulo de Download
 Lógica reutilizável para download de vídeos/áudios
 """
 import os

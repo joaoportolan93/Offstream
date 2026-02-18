@@ -1,5 +1,5 @@
 """
-MediaDownloader Mobile - Interface Kivy
+Offstream Mobile - Interface Kivy
 App para download de vídeos e áudios
 """
 import os
@@ -54,7 +54,7 @@ BoxLayout:
     
     # Header
     Label:
-        text: 'MediaDownloader Mobile'
+        text: 'Offstream Mobile'
         font_size: '24sp'
         size_hint_y: None
         height: 50
@@ -219,7 +219,7 @@ BoxLayout:
 '''
 
 
-class MediaDownloaderApp(App):
+class OffstreamApp(App):
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
         self.downloader = MediaDownloader()
@@ -337,4 +337,4 @@ class MediaDownloaderApp(App):
 
 
 if __name__ == '__main__':
-    MediaDownloaderApp().run()
+    OffstreamApp().run()

@@ -1,7 +1,7 @@
 [app]
-title = MediaDownloader
-package.name = mediadownloader
-package.domain = org.mediadownloader
+title = Offstream
+package.name = offstream
+package.domain = org.offstream
 source.dir = .
 source.include_exts = py,png,jpg,kv,atlas
 
