@@ -15,6 +15,6 @@ We take the security of Offstream seriously. If you discover a security vulnerab
 
 **DO NOT** create a public GitHub issue for security vulnerabilities.
 
-Instead, please send an email to [security@example.com] (replace with actual email if available, or instruct to open a private advisory).
+Instead, please send an email to joaoportolan93@gmail.com 
 
 We will verify the vulnerability and work on a fix. We appreciate your cooperation in disclosing vulnerabilities responsibly.
